@@ -1,0 +1,244 @@
+#!/usr/bin/env bash
+#
+# Azure Default Egress Assessment Tool - Bash Launcher Script
+# Copyright © 2025 Aviatrix Systems, Inc. All rights reserved.
+#
+# This script checks for Python, installs required packages, and runs the Azure Egress Assessment tool.
+
+set -e
+
+# ANSI color codes
+BLUE='\033[0;34m'
+GREEN='\033[0;32m'
+YELLOW='\033[0;33m'
+RED='\033[0;31m'
+NC='\033[0m' # No Color
+BOLD='\033[1m'
+
+# Script variables
+# In a production environment, this would be a real URL to the hosted script
+# For our test purpose, we'll use the local file path
+SCRIPT_URL="https://example.com/azure_egress_assessment.py"
+# Use the actual file path for local testing
+SCRIPT_PATH="/Users/christophermchenry/Documents/Scripting/azure-default-egress-assessment/scripts/azure_egress_assessment.py"
+REQUIREMENTS=(
+    "azure-identity"
+    "azure-mgmt-resource"
+    "azure-mgmt-network"
+    "azure-mgmt-subscription"
+)
+
+# Print banner
+echo -e "${BLUE}${BOLD}"
+echo "======================================================"
+echo "    Azure Default Egress Assessment Tool - Launcher   "
+echo "======================================================"
+echo -e "${NC}"
+echo -e "Copyright © 2025 Aviatrix Systems, Inc. All rights reserved.\n"
+
+# Function to check if a command exists
+command_exists() {
+    command -v "$1" &> /dev/null
+}
+
+# Function to get Python executable
+get_python_executable() {
+    if command_exists python3; then
+        echo "python3"
+    elif command_exists python && [[ $(python --version 2>&1) == *"Python 3"* ]]; then
+        echo "python"
+    else
+        echo ""
+    fi
+}
+
+# Function to check Python version
+check_python_version() {
+    local python_exe=$1
+    local python_version=$($python_exe --version 2>&1 | cut -d ' ' -f 2)
+    local major=$(echo "$python_version" | cut -d '.' -f 1)
+    local minor=$(echo "$python_version" | cut -d '.' -f 2)
+    
+    if [[ "$major" -lt 3 ]] || ([[ "$major" -eq 3 ]] && [[ "$minor" -lt 6 ]]); then
+        return 1
+    else
+        return 0
+    fi
+}
+
+# Function to install packages using pip
+install_packages() {
+    local python_exe=$1
+    local pip_exe="${python_exe} -m pip"
+
+    echo -e "\n${BLUE}Checking and installing required Python packages...${NC}"
+
+    # Check if pip exists
+    if ! $python_exe -m pip --version &> /dev/null; then
+        echo -e "${YELLOW}pip not found. Attempting to install pip...${NC}"
+        if command_exists curl; then
+            curl https://bootstrap.pypa.io/get-pip.py -o get-pip.py
+            $python_exe get-pip.py --user
+            rm get-pip.py
+        elif command_exists wget; then
+            wget https://bootstrap.pypa.io/get-pip.py
+            $python_exe get-pip.py --user
+            rm get-pip.py
+        else
+            echo -e "${RED}Error: Neither curl nor wget found. Please install pip manually.${NC}"
+            exit 1
+        fi
+    fi
+
+    # Update pip
+    echo -e "${BLUE}Updating pip...${NC}"
+    $python_exe -m pip install --upgrade pip --quiet
+
+    # Install each required package
+    for package in "${REQUIREMENTS[@]}"; do
+        echo -e "${BLUE}Installing $package...${NC}"
+        $python_exe -m pip install --upgrade $package --quiet
+    done
+
+    echo -e "${GREEN}All required packages installed successfully.${NC}"
+}
+
+# Function to download the assessment script
+download_script() {
+    # For local testing, check if the script already exists at the path
+    if [ -f "$SCRIPT_PATH" ]; then
+        echo -e "\n${GREEN}Using existing script at $SCRIPT_PATH${NC}"
+        return
+    fi
+    
+    echo -e "\n${BLUE}Downloading the Azure Egress Assessment script...${NC}"
+    
+    # In production, this would download from a real URL
+    if command_exists curl; then
+        curl -s -L -o "$SCRIPT_PATH" "$SCRIPT_URL"
+    elif command_exists wget; then
+        wget -q -O "$SCRIPT_PATH" "$SCRIPT_URL"
+    else
+        echo -e "${RED}Error: Neither curl nor wget found. Cannot download the script.${NC}"
+        exit 1
+    fi
+    
+    if [ -f "$SCRIPT_PATH" ]; then
+        chmod +x "$SCRIPT_PATH"
+        echo -e "${GREEN}Assessment script downloaded successfully.${NC}"
+    else
+        echo -e "${RED}Error: Failed to download the script.${NC}"
+        exit 1
+    fi
+}
+
+# Function to check if Azure CLI is logged in
+check_azure_login() {
+    echo -e "\n${BLUE}Checking Azure CLI login status...${NC}"
+    
+    if command_exists az; then
+        if az account show &> /dev/null; then
+            echo -e "${GREEN}Azure CLI is logged in.${NC}"
+        else
+            echo -e "${YELLOW}You are not logged into Azure CLI. Please log in:${NC}"
+            az login
+            
+            if [ $? -ne 0 ]; then
+                echo -e "${RED}Azure login failed. Please make sure Azure CLI is properly installed and try again.${NC}"
+                exit 1
+            fi
+            
+            echo -e "${GREEN}Azure CLI login successful.${NC}"
+        fi
+    else
+        echo -e "${YELLOW}Azure CLI not found. The script will try to use DefaultAzureCredential instead.${NC}"
+        echo -e "${YELLOW}If authentication fails, please install Azure CLI with:${NC}"
+        echo -e "${YELLOW}    https://docs.microsoft.com/en-us/cli/azure/install-azure-cli${NC}"
+    fi
+}
+
+# Function to run the assessment
+run_assessment() {
+    local python_exe=$1
+    shift
+    local args=("$@")
+    
+    echo -e "\n${BLUE}Running Azure Default Egress Assessment...${NC}"
+    echo -e "${BLUE}This may take several minutes depending on the size of your Azure environment.${NC}\n"
+    
+    # For local testing, use the path to the actual script
+    if [ -f "$SCRIPT_PATH" ]; then
+        echo -e "${GREEN}Using script at: $SCRIPT_PATH${NC}"
+        $python_exe "$SCRIPT_PATH" "${args[@]}"
+    else
+        echo -e "${RED}Error: Assessment script not found at $SCRIPT_PATH${NC}"
+        exit 1
+    fi
+}
+
+# Main script execution
+main() {
+    # Check for Python 3.6+
+    PYTHON_EXE=$(get_python_executable)
+    
+    if [ -z "$PYTHON_EXE" ]; then
+        echo -e "${RED}Error: Python 3.6+ is required but not found.${NC}"
+        echo -e "${YELLOW}Attempting to install Python 3...${NC}"
+        
+        # Try to install Python based on the platform
+        if command_exists apt-get; then
+            sudo apt-get update
+            sudo apt-get install -y python3 python3-pip
+        elif command_exists yum; then
+            sudo yum install -y python3 python3-pip
+        elif command_exists brew; then
+            brew install python
+        else
+            echo -e "${RED}Error: Could not install Python automatically.${NC}"
+            echo -e "${YELLOW}Please install Python 3.6+ manually:${NC}"
+            echo -e "${YELLOW}    https://www.python.org/downloads/${NC}"
+            exit 1
+        fi
+        
+        # Check again
+        PYTHON_EXE=$(get_python_executable)
+        
+        if [ -z "$PYTHON_EXE" ]; then
+            echo -e "${RED}Error: Python installation failed.${NC}"
+            exit 1
+        fi
+    fi
+    
+    # Check Python version
+    if ! check_python_version "$PYTHON_EXE"; then
+        echo -e "${RED}Error: Python 3.6+ is required.${NC}"
+        echo -e "${YELLOW}Current version: $($PYTHON_EXE --version)${NC}"
+        exit 1
+    else
+        echo -e "${GREEN}Found $(${PYTHON_EXE} --version)${NC}"
+    fi
+    
+    # If running from URL without download, use the embedded script
+    if [ "$0" = "bash" ] || [ "${0##*/}" = "bash" ]; then
+        # We're running through curl/wget | bash, so we need to download the script
+        download_script
+    elif [ ! -f "$SCRIPT_PATH" ]; then
+        # The script doesn't exist locally
+        download_script
+    else
+        # The script exists locally - using it as is
+        echo -e "${GREEN}Using local assessment script: $SCRIPT_PATH${NC}"
+    fi
+    
+    # Install required packages
+    install_packages "$PYTHON_EXE"
+    
+    # Check Azure login status
+    check_azure_login
+    
+    # Run the assessment
+    run_assessment "$PYTHON_EXE" "$@"
+}
+
+# Execute main with all args
+main "$@"
