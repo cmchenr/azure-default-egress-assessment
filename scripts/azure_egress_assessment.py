@@ -700,33 +700,93 @@ class AzureEgressAssessment:
                     <h3>Subnets</h3>
                     <div class="number">{total_subnets}</div>
                 </div>
-                <div class="summary-box">
-                    <h3>Affected Subnets</h3>
-                    <div class="number">{total_affected_subnets}</div>
-                </div>
-                <div class="summary-box">
-                    <h3>Quick Remediation Needed</h3>
-                    <div class="number">{total_quick_remediation}</div>
-                </div>
-                <div class="summary-box">
-                    <h3>Mixed-Mode Remediation</h3>
-                    <div class="number">{total_mixed_mode}</div>
-                </div>
-                <div class="summary-box">
-                    <h3>VNets With Insufficient RTs</h3>
-                    <div class="number">{total_vnets_insufficient_rt}</div>
-                </div>
             </div>
             
-            <div class="chart-container">
-                <div class="chart">
-                    <h3>Subnet Impact Assessment</h3>
-                    <canvas id="impactChart"></canvas>
-                </div>
-                <div class="chart">
-                    <h3>Subnet Classification</h3>
-                    <canvas id="classificationChart"></canvas>
-                </div>
+            <h3>Subnet Impact and Classification</h3>
+            <table>
+                <tr>
+                    <th>Subscription</th>
+                    <th>Subnet Name</th>
+                    <th>VNET Name</th>
+                    <th>Classification</th>
+                    <th>Risk Level</th>
+                    <th>Recommended Remediation</th>
+                </tr>"""
+        # Add rows for each subnet across all subscriptions
+        for sub_id, sub_data in self.assessment_data.items():
+            for vnet_id, vnet_data in sub_data['vnets'].items():
+                for subnet_id, subnet_data in vnet_data['subnets'].items():
+                    classification = subnet_data['classification']
+                    
+                    # Determine risk level and remediation based on classification
+                    if classification == 'Not Affected':
+                        risk_level = 'Low'
+                        remediation = 'No action needed'
+                        classification_class = 'not-affected'
+                    elif classification == 'Quick Remediation Ready':
+                        risk_level = 'Medium'
+                        remediation = 'Add route table with default route'
+                        classification_class = 'quick-remediation'
+                    else:
+                        risk_level = 'High'
+                        remediation = 'Review and plan mixed-mode migration'
+                        classification_class = 'mixed-mode'
+                    
+                    html += f"""
+                <tr>
+                    <td>{sub_data['display_name']}</td>
+                    <td>{subnet_data['name']}</td>
+                    <td>{vnet_data['name']}</td>
+                    <td><span class="classification {classification_class}">{classification}</span></td>
+                    <td>{risk_level}</td>
+                    <td>{remediation}</td>
+                </tr>"""
+                    
+        html += """
+            </table>
+            
+            <h3>Subscription Summary</h3>
+            <table>
+                <tr>
+                    <th>Subscription</th>
+                    <th>Total VNETs</th>
+                    <th>VNETs Needing Remediation</th>
+                    <th>VNETs Not Affected</th>
+                    <th>Impact Percentage</th>
+                </tr>"""
+        # Add rows for each subscription's VNET summary
+        for sub_id, sub_data in self.assessment_data.items():
+            vnets_total = len(sub_data['vnets'])
+            vnets_affected = 0
+            vnets_not_affected = 0
+            
+            for vnet_id, vnet_data in sub_data['vnets'].items():
+                if vnet_data['affected_subnets_count'] > 0:
+                    vnets_affected += 1
+                else:
+                    vnets_not_affected += 1
+            
+            impact_percentage = (vnets_affected / vnets_total * 100) if vnets_total > 0 else 0
+            
+            html += f"""
+                <tr>
+                    <td>{sub_data['display_name']}</td>
+                    <td>{vnets_total}</td>
+                    <td>{vnets_affected}</td>
+                    <td>{vnets_not_affected}</td>
+                    <td>{impact_percentage:.1f}%</td>
+                </tr>"""
+                    
+        html += """
+            </table>
+        </div>
+        
+        <div class="chart-container">
+            <div class="chart">
+                <canvas id="impactChart"></canvas>
+            </div>
+            <div class="chart">
+                <canvas id="classificationChart"></canvas>
             </div>
         </div>
         
