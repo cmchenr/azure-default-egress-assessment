@@ -75,7 +75,7 @@ The tool can be run using one of the following methods:
 
 ```bash
 # Download the script
-curl -sSL https://example.com/azure-egress-check.sh -o azure-egress-check.sh
+curl -sSL https://raw.githubusercontent.com/cmchenr/azure-default-egress-assessment/main/scripts/azure-egress-check.sh -o azure-egress-check.sh
 
 # Make it executable
 chmod +x azure-egress-check.sh
@@ -88,7 +88,7 @@ chmod +x azure-egress-check.sh
 
 ```powershell
 # Download the script
-Invoke-WebRequest -Uri https://example.com/azure-egress-check.ps1 -OutFile azure-egress-check.ps1
+Invoke-WebRequest -Uri https://raw.githubusercontent.com/cmchenr/azure-default-egress-assessment/main/scripts/azure-egress-check.ps1 -OutFile azure-egress-check.ps1
 
 # Run the assessment
 ./azure-egress-check.ps1
@@ -99,13 +99,13 @@ Invoke-WebRequest -Uri https://example.com/azure-egress-check.ps1 -OutFile azure
 #### For Linux/macOS:
 
 ```bash
-curl -sSL https://example.com/azure-egress-check.sh | bash
+curl -sSL https://raw.githubusercontent.com/cmchenr/azure-default-egress-assessment/main/scripts/azure-egress-check.sh | bash
 ```
 
 #### For Windows:
 
 ```powershell
-iwr -useb https://example.com/azure-egress-check.ps1 | iex
+iwr -useb https://raw.githubusercontent.com/cmchenr/azure-default-egress-assessment/main/scripts/azure-egress-check.ps1 | iex
 ```
 
 ### Advanced Usage Options

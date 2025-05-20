@@ -16,11 +16,13 @@ NC='\033[0m' # No Color
 BOLD='\033[1m'
 
 # Script variables
-# In a production environment, this would be a real URL to the hosted script
-# For our test purpose, we'll use the local file path
-SCRIPT_URL="https://example.com/azure_egress_assessment.py"
-# Use the actual file path for local testing
-SCRIPT_PATH="/Users/christophermchenry/Documents/Scripting/azure-default-egress-assessment/scripts/azure_egress_assessment.py"
+# GitHub repository information
+GITHUB_REPO="cmchenr/azure-default-egress-assessment"
+GITHUB_BRANCH="main"
+# URLs for script download
+SCRIPT_URL="https://raw.githubusercontent.com/$GITHUB_REPO/$GITHUB_BRANCH/scripts/azure_egress_assessment.py"
+# Temp file path for downloaded script
+SCRIPT_PATH="$(mktemp -t azure_egress_assessment.XXXXXX.py)"
 REQUIREMENTS=(
     "azure-identity"
     "azure-mgmt-resource"
@@ -105,15 +107,9 @@ install_packages() {
 
 # Function to download the assessment script
 download_script() {
-    # For local testing, check if the script already exists at the path
-    if [ -f "$SCRIPT_PATH" ]; then
-        echo -e "\n${GREEN}Using existing script at $SCRIPT_PATH${NC}"
-        return
-    fi
+    echo -e "\n${BLUE}Downloading the Azure Egress Assessment script from GitHub...${NC}"
     
-    echo -e "\n${BLUE}Downloading the Azure Egress Assessment script...${NC}"
-    
-    # In production, this would download from a real URL
+    # Download from GitHub
     if command_exists curl; then
         curl -s -L -o "$SCRIPT_PATH" "$SCRIPT_URL"
     elif command_exists wget; then
@@ -125,9 +121,10 @@ download_script() {
     
     if [ -f "$SCRIPT_PATH" ]; then
         chmod +x "$SCRIPT_PATH"
-        echo -e "${GREEN}Assessment script downloaded successfully.${NC}"
+        echo -e "${GREEN}Assessment script downloaded successfully from GitHub.${NC}"
     else
-        echo -e "${RED}Error: Failed to download the script.${NC}"
+        echo -e "${RED}Error: Failed to download the script from GitHub.${NC}"
+        echo -e "${RED}URL: $SCRIPT_URL${NC}"
         exit 1
     fi
 }
@@ -166,20 +163,17 @@ run_assessment() {
     echo -e "\n${BLUE}Running Azure Default Egress Assessment...${NC}"
     echo -e "${BLUE}This may take several minutes depending on the size of your Azure environment.${NC}\n"
     
-    # For local testing, use the path to the actual script
-    if [ -f "$SCRIPT_PATH" ]; then
-        echo -e "${GREEN}Using script at: $SCRIPT_PATH${NC}"
-        $python_exe "$SCRIPT_PATH" "${args[@]}"
-    else
-        echo -e "${RED}Error: Assessment script not found at $SCRIPT_PATH${NC}"
-        exit 1
-    fi
+    # Execute the downloaded script
+    $python_exe "$SCRIPT_PATH" "${args[@]}"
 }
 
 # Main script execution
 main() {
     # Check for Python 3.6+
     PYTHON_EXE=$(get_python_executable)
+    
+    # Create a trap to clean up the temp file on exit
+    trap 'rm -f "$SCRIPT_PATH"; echo -e "\n${BLUE}Cleaning up temporary files...${NC}"' EXIT
     
     if [ -z "$PYTHON_EXE" ]; then
         echo -e "${RED}Error: Python 3.6+ is required but not found.${NC}"
@@ -218,17 +212,8 @@ main() {
         echo -e "${GREEN}Found $(${PYTHON_EXE} --version)${NC}"
     fi
     
-    # If running from URL without download, use the embedded script
-    if [ "$0" = "bash" ] || [ "${0##*/}" = "bash" ]; then
-        # We're running through curl/wget | bash, so we need to download the script
-        download_script
-    elif [ ! -f "$SCRIPT_PATH" ]; then
-        # The script doesn't exist locally
-        download_script
-    else
-        # The script exists locally - using it as is
-        echo -e "${GREEN}Using local assessment script: $SCRIPT_PATH${NC}"
-    fi
+    # Always download the latest script from GitHub
+    download_script
     
     # Install required packages
     install_packages "$PYTHON_EXE"

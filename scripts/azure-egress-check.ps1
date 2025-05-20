@@ -4,11 +4,13 @@
 # This script checks for Python, installs required packages, and runs the Azure Egress Assessment tool.
 
 # Script variables
-# In a production environment, this would be a real URL to the hosted script
-# For our test purpose, we'll use the local file
-$scriptUrl = "https://example.com/azure_egress_assessment.py"
-# For local testing, use the actual file path
-$scriptPath = "/Users/christophermchenry/Documents/Scripting/azure-default-egress-assessment/scripts/azure_egress_assessment.py"
+# GitHub repository information
+$githubRepo = "cmchenr/azure-default-egress-assessment"
+$githubBranch = "main"
+# URL for script download from GitHub
+$scriptUrl = "https://raw.githubusercontent.com/$githubRepo/$githubBranch/scripts/azure_egress_assessment.py"
+# Create a temporary file path
+$scriptPath = [System.IO.Path]::GetTempFileName() -replace '\.tmp$', '.py'
 $requirements = @(
     "azure-identity",
     "azure-mgmt-resource",
@@ -121,20 +123,14 @@ function Install-Packages {
 
 # Function to download the assessment script
 function Download-Script {
-    # For local testing, check if the script already exists at the path
-    if (Test-Path $scriptPath) {
-        Write-Host "`nUsing existing script at $scriptPath" -ForegroundColor Green
-        return
-    }
+    Write-Host "`nDownloading the Azure Egress Assessment script from GitHub..." -ForegroundColor Blue
     
-    Write-Host "`nDownloading the Azure Egress Assessment script..." -ForegroundColor Blue
-    
-    # In production, this would download from a real URL
     try {
         Invoke-WebRequest -Uri $scriptUrl -OutFile $scriptPath -UseBasicParsing
-        Write-Host "Assessment script downloaded successfully." -ForegroundColor Green
+        Write-Host "Assessment script downloaded successfully from GitHub." -ForegroundColor Green
     } catch {
-        Write-Host "Error downloading the script: $_" -ForegroundColor Red
+        Write-Host "Error downloading the script from GitHub: $_" -ForegroundColor Red
+        Write-Host "URL: $scriptUrl" -ForegroundColor Red
         exit 1
     }
 }
@@ -259,43 +255,48 @@ function Main {
         [string[]]$ScriptArgs
     )
     
-    # Check for Python 3.6+
-    $pythonExe = Get-PythonExecutable
-    
-    if (-not $pythonExe) {
-        $pythonExe = Install-Python
+    try {
+        # Check for Python 3.6+
+        $pythonExe = Get-PythonExecutable
         
         if (-not $pythonExe) {
+            $pythonExe = Install-Python
+            
+            if (-not $pythonExe) {
+                exit 1
+            }
+        }
+        
+        # Check Python version
+        if (-not (Test-PythonVersion $pythonExe)) {
+            $currentVersion = & $pythonExe --version 2>&1
+            Write-Host "Error: Python 3.6+ is required." -ForegroundColor Red
+            Write-Host "Current version: $currentVersion" -ForegroundColor Yellow
             exit 1
+        } else {
+            $currentVersion = & $pythonExe --version
+            Write-Host "Found $currentVersion" -ForegroundColor Green
+        }
+        
+        # Always download the latest script from GitHub
+        Download-Script
+        
+        # Install required packages
+        Install-Packages $pythonExe
+        
+        # Check Azure modules
+        Check-AzureModules
+        
+        # Run the assessment
+        Run-Assessment $pythonExe $ScriptArgs
+        
+    } finally {
+        # Clean up the temporary file
+        if (Test-Path $scriptPath) {
+            Write-Host "`nCleaning up temporary files..." -ForegroundColor Blue
+            Remove-Item $scriptPath -Force
         }
     }
-    
-    # Check Python version
-    if (-not (Test-PythonVersion $pythonExe)) {
-        $currentVersion = & $pythonExe --version 2>&1
-        Write-Host "Error: Python 3.6+ is required." -ForegroundColor Red
-        Write-Host "Current version: $currentVersion" -ForegroundColor Yellow
-        exit 1
-    } else {
-        $currentVersion = & $pythonExe --version
-        Write-Host "Found $currentVersion" -ForegroundColor Green
-    }
-    
-    # If running from URL without download, use the embedded script
-    if (-not (Test-Path $scriptPath)) {
-        Download-Script
-    } else {
-        Write-Host "Using local assessment script: $scriptPath" -ForegroundColor Green
-    }
-    
-    # Install required packages
-    Install-Packages $pythonExe
-    
-    # Check Azure modules
-    Check-AzureModules
-    
-    # Run the assessment
-    Run-Assessment $pythonExe $ScriptArgs
 }
 
 # Execute main with all args
