@@ -288,10 +288,10 @@ class AzureEgressAssessment:
             if not subnet_data['uses_default_egress'] or nic_count == 0:
                 subnet_data['classification'] = 'Not Affected'
             elif nic_with_public_ip_count == 0 or nic_with_public_ip_count == nic_count:
-                subnet_data['classification'] = 'Quick Remediation Ready'
+                subnet_data['classification'] = 'Quick Remediation'
                 self.assessment_data[subscription_id]['vnets'][vnet.id]['affected_subnets_count'] += 1
             else:
-                subnet_data['classification'] = 'Mixed-Mode Remediation Required'
+                subnet_data['classification'] = 'Mixed-Mode'
                 self.assessment_data[subscription_id]['vnets'][vnet.id]['affected_subnets_count'] += 1
             
             # Add subnet data to assessment
@@ -301,7 +301,7 @@ class AzureEgressAssessment:
             classification = subnet_data['classification']
             if classification == 'Not Affected':
                 classification_color = Colors.GREEN
-            elif classification == 'Quick Remediation Ready':
+            elif classification == 'Quick Remediation':
                 classification_color = Colors.YELLOW
             else:
                 classification_color = Colors.RED
@@ -377,9 +377,9 @@ class AzureEgressAssessment:
                 for subnet_id, subnet_data in vnet_data['subnets'].items():
                     if subnet_data['classification'] == 'Not Affected':
                         sub_not_affected += 1
-                    elif subnet_data['classification'] == 'Quick Remediation Ready':
+                    elif subnet_data['classification'] == 'Quick Remediation':
                         sub_quick_remediation += 1
-                    elif subnet_data['classification'] == 'Mixed-Mode Remediation Required':
+                    elif subnet_data['classification'] == 'Mixed-Mode':
                         sub_mixed_mode += 1
             
             # Add to totals
@@ -399,8 +399,8 @@ class AzureEgressAssessment:
             print(f"  VNets with Insufficient Route Tables: {sub_vnets_insufficient_rt}")
             print(f"  Classification:")
             print(f"    {Colors.GREEN}Not Affected: {sub_not_affected}{Colors.ENDC}")
-            print(f"    {Colors.YELLOW}Quick Remediation Ready: {sub_quick_remediation}{Colors.ENDC}")
-            print(f"    {Colors.RED}Mixed-Mode Remediation Required: {sub_mixed_mode}{Colors.ENDC}")
+            print(f"    {Colors.YELLOW}Quick Remediation: {sub_quick_remediation}{Colors.ENDC}")
+            print(f"    {Colors.RED}Mixed-Mode: {sub_mixed_mode}{Colors.ENDC}")
         
         # Print overall summary
         print(f"\n{Colors.HEADER}==================== OVERALL SUMMARY ===================={Colors.ENDC}")
@@ -411,8 +411,8 @@ class AzureEgressAssessment:
         print(f"Total VNets with Insufficient Route Tables: {total_vnets_insufficient_rt}")
         print(f"Classification:")
         print(f"  {Colors.GREEN}Not Affected: {total_not_affected}{Colors.ENDC}")
-        print(f"  {Colors.YELLOW}Quick Remediation Ready: {total_quick_remediation}{Colors.ENDC}")
-        print(f"  {Colors.RED}Mixed-Mode Remediation Required: {total_mixed_mode}{Colors.ENDC}")
+        print(f"  {Colors.YELLOW}Quick Remediation: {total_quick_remediation}{Colors.ENDC}")
+        print(f"  {Colors.RED}Mixed-Mode: {total_mixed_mode}{Colors.ENDC}")
         
         # Print output locations
         print(f"\n{Colors.HEADER}==================== REPORTS ===================={Colors.ENDC}")
@@ -451,9 +451,9 @@ class AzureEgressAssessment:
                     for subnet_id, subnet_data in vnet_data['subnets'].items():
                         if subnet_data['classification'] == 'Not Affected':
                             total_not_affected += 1
-                        elif subnet_data['classification'] == 'Quick Remediation Ready':
+                        elif subnet_data['classification'] == 'Quick Remediation':
                             total_quick_remediation += 1
-                        elif subnet_data['classification'] == 'Mixed-Mode Remediation Required':
+                        elif subnet_data['classification'] == 'Mixed-Mode':
                             total_mixed_mode += 1
             
             # Generate HTML content
@@ -562,15 +562,29 @@ class AzureEgressAssessment:
             justify-content: space-between;
             margin-bottom: 20px;
             flex-wrap: wrap;
+            gap: 20px;
         }}
         .chart {{
             background-color: #fff;
             padding: 20px;
             border-radius: 5px;
             box-shadow: 0 0 5px rgba(0, 0, 0, 0.1);
-            width: calc(50% - 20px);
+            flex: 1;
+            min-width: 300px;
+            height: 400px;
+            display: flex;
+            flex-direction: column;
+        }}
+        .chart h3 {{
+            margin-top: 0;
             margin-bottom: 20px;
-            box-sizing: border-box;
+            color: #0072C6;
+            text-align: center;
+        }}
+        .chart canvas {{
+            flex: 1;
+            width: 100% !important;
+            height: 100% !important;
         }}
         .subscription {{
             background-color: #f9f9f9;
@@ -723,7 +737,7 @@ class AzureEgressAssessment:
                         risk_level = 'Low'
                         remediation = 'No action needed'
                         classification_class = 'not-affected'
-                    elif classification == 'Quick Remediation Ready':
+                    elif classification == 'Quick Remediation':
                         risk_level = 'Medium'
                         remediation = 'Add route table with default route'
                         classification_class = 'quick-remediation'
@@ -783,22 +797,23 @@ class AzureEgressAssessment:
         
         <div class="chart-container">
             <div class="chart">
+                <h3>Impact Assessment</h3>
                 <canvas id="impactChart"></canvas>
             </div>
             <div class="chart">
+                <h3>Classification Distribution</h3>
                 <canvas id="classificationChart"></canvas>
             </div>
         </div>
         
-        <h2>Detailed Assessment</h2>
-        
         <div class="remediation">
             <h4>Remediation Guidance</h4>
-            <p><strong>For Quick Remediation Ready Subnets:</strong> Add a route table with a default route (0.0.0.0/0) or deploy a NAT Gateway.</p>
-            <p><strong>For Mixed-Mode Remediation Required Subnets:</strong> Consider restructuring the subnet to separate resources with public IPs from those without, or implement a consistent connectivity strategy.</p>
+            <p><strong>For Quick Remediation Subnets:</strong> Add a route table with a default route (0.0.0.0/0) or deploy a NAT Gateway.</p>
+            <p><strong>For Mixed-Mode Subnets:</strong> Consider restructuring the subnet to separate resources with public IPs from those without, or implement a consistent connectivity strategy.</p>
             <p><strong>For VNets with Insufficient Route Tables:</strong> Add additional route tables to ensure proper NVA load balancing.</p>
         </div>
-"""
+
+    <!-- Subscription Details -->"""
         
         # Add subscription details
         for sub_id, sub_data in self.assessment_data.items():
@@ -858,7 +873,7 @@ class AzureEgressAssessment:
                         classification_class = ""
                         if classification == "Not Affected":
                             classification_class = "not-affected"
-                        elif classification == "Quick Remediation Ready":
+                        elif classification == "Quick Remediation":
                             classification_class = "quick-remediation"
                         else:
                             classification_class = "mixed-mode"
@@ -901,42 +916,103 @@ class AzureEgressAssessment:
             <p>Copyright © 2025 Aviatrix Systems, Inc. All rights reserved.</p>
         </div>
     </div>
-    
+
     <script>
-        // Collapsible sections
-        var coll = document.getElementsByClassName("collapsible");
-        var i;
-        
-        for (i = 0; i < coll.length; i++) {
-            coll[i].addEventListener("click", function() {
-                this.classList.toggle("active");
-                var content = this.nextElementSibling;
-                if (content.style.maxHeight) {
-                    content.style.maxHeight = null;
-                } else {
-                    content.style.maxHeight = content.scrollHeight + "px";
-                } 
-            });
-        }
-        
+        document.addEventListener('DOMContentLoaded', function() {
+            // Initialize collapsible sections
+            var coll = document.getElementsByClassName("collapsible");
+            var i;
+            
+            for (i = 0; i < coll.length; i++) {
+                coll[i].addEventListener("click", function() {
+                    this.classList.toggle("active");
+                    var content = this.nextElementSibling;
+                    if (content.style.maxHeight) {
+                        content.style.maxHeight = null;
+                    } else {
+                        content.style.maxHeight = content.scrollHeight + "px";
+                    } 
+                });
+            }
+        });
+
         // Charts
         window.onload = function() {
+            // Common chart options
+            const commonOptions = {
+                responsive: true,
+                maintainAspectRatio: false,
+                cutout: '60%',
+                layout: {
+                    padding: 20
+                },
+                plugins: {
+                    legend: {
+                        position: 'bottom',
+                        labels: {
+                            padding: 20,
+                            usePointStyle: true,
+                            pointStyle: 'circle'
+                        }
+                    },
+                    title: {
+                        display: true,
+                        font: {
+                            size: 16,
+                            weight: 'bold'
+                        },
+                        padding: {
+                            top: 10,
+                            bottom: 30
+                        }
+                    },
+                    tooltip: {
+                        backgroundColor: 'rgba(0,0,0,0.8)',
+                        titleFont: {
+                            size: 14
+                        },
+                        bodyFont: {
+                            size: 13
+                        },
+                        padding: 12,
+                        cornerRadius: 6,
+                        displayColors: true
+                    }
+                }
+            };
+
             // Impact Chart
             var impactCtx = document.getElementById('impactChart').getContext('2d');
             var impactChart = new Chart(impactCtx, {
-                type: 'pie',
+                type: 'doughnut',
                 data: {
                     labels: ['Affected', 'Not Affected'],
                     datasets: [{
-                        data: [""" + f"{total_affected_subnets}, {total_subnets - total_affected_subnets}" + """],
-                        backgroundColor: ['#f8d7da', '#d4edda']
+                        data: [
+""" + f"{total_affected_subnets}, {total_subnets - total_affected_subnets}" + """],
+                        backgroundColor: ['#f8d7da', '#d4edda'],
+                        borderWidth: 1,
+                        borderColor: 'white'
                     }]
                 },
                 options: {
-                    responsive: true,
+                    ...commonOptions,
                     plugins: {
-                        legend: {
-                            position: 'bottom',
+                        ...commonOptions.plugins,
+                        title: {
+                            ...commonOptions.plugins.title,
+                            text: 'Subnet Impact Assessment'
+                        },
+                        tooltip: {
+                            ...commonOptions.plugins.tooltip,
+                            callbacks: {
+                                label: function(context) {
+                                    const value = context.raw;
+                                    const total = context.dataset.data.reduce((a, b) => a + b, 0);
+                                    const percentage = ((value / total) * 100).toFixed(1);
+                                    return `${context.label}: ${value} subnets (${percentage}%)`;
+                                }
+                            }
                         }
                     }
                 }
@@ -945,19 +1021,34 @@ class AzureEgressAssessment:
             // Classification Chart
             var classCtx = document.getElementById('classificationChart').getContext('2d');
             var classChart = new Chart(classCtx, {
-                type: 'pie',
+                type: 'doughnut',
                 data: {
-                    labels: ['Not Affected', 'Quick Remediation Ready', 'Mixed-Mode Remediation'],
+                    labels: ['Not Affected', 'Quick Remediation', 'Mixed-Mode'],
                     datasets: [{
                         data: [""" + f"{total_not_affected}, {total_quick_remediation}, {total_mixed_mode}" + """],
-                        backgroundColor: ['#d4edda', '#fff3cd', '#f8d7da']
+                        backgroundColor: ['#d4edda', '#fff3cd', '#f8d7da'],
+                        borderWidth: 1,
+                        borderColor: 'white'
                     }]
                 },
                 options: {
-                    responsive: true,
+                    ...commonOptions,
                     plugins: {
-                        legend: {
-                            position: 'bottom',
+                        ...commonOptions.plugins,
+                        title: {
+                            ...commonOptions.plugins.title,
+                            text: 'Subnet Classification Distribution'
+                        },
+                        tooltip: {
+                            ...commonOptions.plugins.tooltip,
+                            callbacks: {
+                                label: function(context) {
+                                    const value = context.raw;
+                                    const total = context.dataset.data.reduce((a, b) => a + b, 0);
+                                    const percentage = ((value / total) * 100).toFixed(1);
+                                    return `${context.label}: ${value} subnets (${percentage}%)`;
+                                }
+                            }
                         }
                     }
                 }
