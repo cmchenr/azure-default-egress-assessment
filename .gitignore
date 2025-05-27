@@ -20,6 +20,16 @@ var/
 .installed.cfg
 *.egg
 
+# Local .terraform directories
+**/.terraform/*
+**/terraform
+
+# .tfstate files
+*.tfstate
+*.tfstate.*
+
+azure-default-egress.md
+
 # Virtual Environment
 venv/
 ENV/
