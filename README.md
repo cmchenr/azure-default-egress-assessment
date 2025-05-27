@@ -53,6 +53,14 @@ The tool generates an HTML report with the following information:
 
 The report is saved in the current directory with a timestamp in the filename.
 
+### Sample Report
+
+Here's what the generated HTML report looks like:
+
+![Azure Egress Assessment Report](azure-egress-report-screenshot.png)
+
+*Sample Azure Default Egress Assessment Report showing the executive summary, resource analysis, and recommendations dashboard.*
+
 ## Mitigation Recommendations
 
 For affected subnets, the following mitigation strategies are recommended:
@@ -129,6 +137,34 @@ You can pass additional parameters to the assessment tool:
 - Python 3.6 or higher (will be automatically installed if missing)
 - Azure CLI (recommended) or Azure PowerShell module
 - Internet connection to download the script and required Python packages
+
+## Test Environment
+
+A Terraform module is included in the `/terraform` directory to help you create a test environment with various Azure Virtual Network configurations. This allows you to validate how the assessment tool detects and classifies different egress scenarios.
+
+### Using the Test Environment
+
+1. Navigate to the terraform directory:
+   ```bash
+   cd terraform
+   ```
+
+2. Deploy using the helper script:
+   ```bash
+   ./deploy_and_test.sh
+   ```
+
+The test environment deploys 8 VNets with different egress configurations:
+- Default egress with no explicit configuration
+- NAT Gateway for explicit outbound
+- Route Table with default route
+- Route Table without default route
+- Mixed-mode subnet (some VMs with public IPs, some without)
+- Load Balancer with outbound rules
+- Private subnet configuration
+- Multiple route tables for NVA load balancing
+
+For more details, see the README in the terraform directory.
 
 ## Security and Privacy
 

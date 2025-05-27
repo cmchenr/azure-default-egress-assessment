@@ -1,0 +1,727 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Azure Default Egress Assessment Report</title>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+            background-color: #f8f9fa;
+            color: #2c3e50;
+            line-height: 1.5;
+        }
+
+        .layout {
+            display: flex;
+            min-height: 100vh;
+        }
+
+        .sidebar {
+            width: 280px;
+            background: linear-gradient(180deg, #2c3548 0%, #3d4a5c 100%);
+            color: white;
+            padding: 0;
+            position: fixed;
+            height: 100vh;
+            overflow-y: auto;
+            box-shadow: 2px 0 10px rgba(0,0,0,0.1);
+        }
+
+        .sidebar-header {
+            padding: 24px 20px;
+            border-bottom: 1px solid rgba(255,255,255,0.1);
+        }
+
+        .sidebar-header h1 {
+            font-size: 20px;
+            font-weight: 600;
+            margin-bottom: 4px;
+            display: flex;
+            align-items: center;
+            gap: 12px;
+        }
+
+        .sidebar-header .subtitle {
+            font-size: 14px;
+            color: rgba(255,255,255,0.7);
+        }
+
+        .nav-section {
+            padding: 20px 0;
+        }
+
+        .nav-item {
+            padding: 12px 20px;
+            cursor: pointer;
+            transition: all 0.2s ease;
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            color: rgba(255,255,255,0.8);
+            border-left: 3px solid transparent;
+        }
+
+        .nav-item:hover {
+            background-color: rgba(255,255,255,0.08);
+            color: white;
+        }
+
+        .nav-item.active {
+            background-color: rgba(255,255,255,0.1);
+            border-left-color: #3498db;
+            color: white;
+        }
+
+        .nav-item i {
+            width: 18px;
+            text-align: center;
+        }
+
+        .main-content {
+            flex: 1;
+            margin-left: 280px;
+            padding: 0;
+            background-color: #f8f9fa;
+        }
+
+        .content-header {
+            background: white;
+            padding: 24px 32px;
+            border-bottom: 1px solid #e9ecef;
+            box-shadow: 0 1px 3px rgba(0,0,0,0.05);
+        }
+
+        .content-header h1 {
+            font-size: 28px;
+            font-weight: 600;
+            color: #2c3e50;
+            margin-bottom: 8px;
+        }
+
+        .content-header .meta {
+            color: #6c757d;
+            font-size: 14px;
+        }
+
+        .content-body {
+            padding: 32px;
+        }
+
+        .alert {
+            padding: 16px 20px;
+            border-radius: 8px;
+            margin-bottom: 24px;
+            border-left: 4px solid;
+            background: white;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.05);
+        }
+
+        .alert-warning {
+            border-left-color: #f39c12;
+            background-color: #fff8e1;
+            color: #8a6d3b;
+        }
+
+        .alert-info {
+            border-left-color: #3498db;
+            background-color: #e8f4f8;
+            color: #2980b9;
+        }
+
+        .stats-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+            gap: 24px;
+            margin-bottom: 32px;
+        }
+
+        .stat-card {
+            background: white;
+            padding: 24px;
+            border-radius: 12px;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.08);
+            border: 1px solid #e9ecef;
+            transition: transform 0.2s ease, box-shadow 0.2s ease;
+        }
+
+        .stat-card:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 4px 16px rgba(0,0,0,0.12);
+        }
+
+        .stat-card h3 {
+            font-size: 14px;
+            font-weight: 600;
+            color: #6c757d;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            margin-bottom: 12px;
+        }
+
+        .stat-card .number {
+            font-size: 36px;
+            font-weight: 700;
+            color: #2c3e50;
+            margin-bottom: 8px;
+        }
+
+        .stat-card .description {
+            font-size: 14px;
+            color: #6c757d;
+        }
+
+        .section {
+            background: white;
+            border-radius: 12px;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.08);
+            border: 1px solid #e9ecef;
+            margin-bottom: 24px;
+            overflow: hidden;
+        }
+
+        .section-header {
+            padding: 20px 24px;
+            border-bottom: 1px solid #e9ecef;
+            background: #f8f9fa;
+        }
+
+        .section-header h2 {
+            font-size: 20px;
+            font-weight: 600;
+            color: #2c3e50;
+            margin: 0;
+        }
+
+        .section-content {
+            padding: 24px;
+        }
+
+        .chart-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(400px, 1fr));
+            gap: 24px;
+            margin-bottom: 32px;
+        }
+
+        .chart-container {
+            background: white;
+            border-radius: 12px;
+            padding: 24px;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.08);
+            border: 1px solid #e9ecef;
+        }
+
+        .chart-container h3 {
+            font-size: 18px;
+            font-weight: 600;
+            color: #2c3e50;
+            margin-bottom: 20px;
+            text-align: center;
+        }
+
+        .chart-wrapper {
+            height: 300px;
+            position: relative;
+        }
+
+        .table-container {
+            overflow-x: auto;
+            border-radius: 8px;
+            border: 1px solid #e9ecef;
+        }
+
+        .data-table {
+            width: 100%;
+            border-collapse: collapse;
+            background: white;
+        }
+
+        .data-table th {
+            background: #f8f9fa;
+            padding: 16px 12px;
+            text-align: left;
+            font-weight: 600;
+            color: #495057;
+            font-size: 14px;
+            border-bottom: 2px solid #e9ecef;
+        }
+
+        .data-table td {
+            padding: 16px 12px;
+            border-bottom: 1px solid #e9ecef;
+            font-size: 14px;
+        }
+
+        .data-table tr:hover {
+            background-color: #f8f9fa;
+        }
+
+        .status-badge {
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            padding: 6px 12px;
+            border-radius: 20px;
+            font-size: 12px;
+            font-weight: 600;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+
+        .status-not-affected {
+            background: #d4edda;
+            color: #155724;
+        }
+
+        .status-quick-remediation {
+            background: #fff3cd;
+            color: #856404;
+        }
+
+        .status-mixed-mode {
+            background: #f8d7da;
+            color: #721c24;
+        }
+
+        .status-insufficient-rt {
+            background: #cce7ff;
+            color: #004085;
+        }
+
+        .risk-high { color: #dc3545; }
+        .risk-medium { color: #fd7e14; }
+        .risk-low { color: #28a745; }
+        .risk-none { color: #6c757d; }
+
+        .collapsible {
+            background: #f8f9fa;
+            border: none;
+            padding: 16px 24px;
+            width: 100%;
+            text-align: left;
+            cursor: pointer;
+            font-size: 16px;
+            font-weight: 600;
+            color: #2c3e50;
+            border-radius: 0;
+            transition: background-color 0.2s ease;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .collapsible:hover {
+            background: #e9ecef;
+        }
+
+        .collapsible.active {
+            background: #e3f2fd;
+            color: #1976d2;
+        }
+
+        .collapsible::after {
+            content: '\f107';
+            font-family: 'Font Awesome 6 Free';
+            font-weight: 900;
+            transition: transform 0.2s ease;
+        }
+
+        .collapsible.active::after {
+            transform: rotate(180deg);
+        }
+
+        .collapsible-content {
+            max-height: 0;
+            overflow: hidden;
+            transition: max-height 0.3s ease;
+            background: white;
+        }
+
+        .remediation-guidance {
+            background: linear-gradient(135deg, #e8f5e9 0%, #f1f8e9 100%);
+            border: 1px solid #c8e6c9;
+            border-radius: 12px;
+            padding: 24px;
+            margin-bottom: 24px;
+        }
+
+        .remediation-guidance h3 {
+            color: #2e7d32;
+            font-size: 18px;
+            font-weight: 600;
+            margin-bottom: 16px;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .remediation-item {
+            margin-bottom: 16px;
+            padding: 16px;
+            background: rgba(255,255,255,0.7);
+            border-radius: 8px;
+            border-left: 4px solid #4caf50;
+        }
+
+        .remediation-item:last-child {
+            margin-bottom: 0;
+        }
+
+        .footer {
+            background: #2c3548;
+            color: white;
+            padding: 24px 32px;
+            text-align: center;
+            font-size: 14px;
+        }
+
+        .footer .logo {
+            font-size: 18px;
+            font-weight: 600;
+            margin-bottom: 8px;
+        }
+
+        @media (max-width: 768px) {
+            .sidebar {
+                transform: translateX(-100%);
+            }
+            
+            .main-content {
+                margin-left: 0;
+            }
+            
+            .stats-grid {
+                grid-template-columns: 1fr;
+            }
+            
+            .chart-grid {
+                grid-template-columns: 1fr;
+            }
+            
+            .content-body {
+                padding: 20px;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="layout">
+        <div class="sidebar">
+            <div class="sidebar-header">
+                <h1><i class="fas fa-cloud"></i> Azure Assessment</h1>
+                <div class="subtitle">Egress Impact Analysis</div>
+            </div>
+            <div class="nav-section">
+                <div class="nav-item active" data-target="executive-summary">
+                    <i class="fas fa-chart-line"></i>
+                    <span>Executive Summary</span>
+                </div>
+                <div class="nav-item" data-target="network-analysis">
+                    <i class="fas fa-network-wired"></i>
+                    <span>Network Analysis</span>
+                </div>
+                <div class="nav-item" data-target="impact-assessment">
+                    <i class="fas fa-exclamation-triangle"></i>
+                    <span>Impact Assessment</span>
+                </div>
+                <div class="nav-item" data-target="remediation">
+                    <i class="fas fa-tools"></i>
+                    <span>Remediation</span>
+                </div>
+                <div class="nav-item" data-target="subscription-details">
+                    <i class="fas fa-server"></i>
+                    <span>Subscription Details</span>
+                </div>
+            </div>
+        </div>
+
+        <div class="main-content">
+            <div class="content-header">
+                <h1>Azure Default Egress Assessment Report</h1>
+                <div class="meta">Generated on {{ generated_date }} | Last Updated: {{ last_updated }}</div>
+            </div>
+
+                            <div class="content-body">
+                <section id="executive-summary">
+                    <div class="alert alert-warning">
+                        <strong><i class="fas fa-exclamation-triangle"></i> Important Notice:</strong>
+                        This report provides an assessment of the impact of Azure's upcoming change to default internet egress on your environment.
+                    </div>
+
+                    <div class="alert alert-info">
+                        <strong><i class="fas fa-info-circle"></i> Analysis Complete:</strong>
+                        Assessment completed for {{ subscriptions_count }} subscriptions with {{ total_vnets }} virtual networks.
+                    </div>
+
+                    <div class="stats-grid">
+                        <div class="stat-card">
+                            <h3>Subscriptions</h3>
+                            <div class="number">{{ subscriptions_count }}</div>
+                            <div class="description">Total analyzed</div>
+                        </div>
+                        <div class="stat-card">
+                            <h3>Virtual Networks</h3>
+                            <div class="number">{{ total_vnets }}</div>
+                            <div class="description">Across all subscriptions</div>
+                        </div>
+                        <div class="stat-card">
+                            <h3>Subnets</h3>
+                            <div class="number">{{ total_subnets }}</div>
+                            <div class="description">Total subnet count</div>
+                        </div>
+                        <div class="stat-card">
+                            <h3>Impact Rate</h3>
+                            <div class="number">{{ impact_percentage }}%</div>
+                            <div class="description">Subnets requiring attention</div>
+                        </div>
+                    </div>
+                </section>
+
+                <section id="network-analysis">
+                    <div class="chart-grid">
+                        <div class="chart-container">
+                            <h3>Impact Assessment</h3>
+                            <div class="chart-wrapper">
+                                <canvas id="impactChart"></canvas>
+                            </div>
+                        </div>
+                        <div class="chart-container">
+                            <h3>Classification Distribution</h3>
+                            <div class="chart-wrapper">
+                                <canvas id="classificationChart"></canvas>
+                            </div>
+                        </div>
+                    </div>
+                </section>
+
+                <section id="impact-assessment">
+                    <div class="section">
+                        <div class="section-header">
+                            <h2>Subnet Impact Analysis</h2>
+                        </div>
+                        <div class="section-content">
+                            <div class="table-container">
+                                <table class="data-table">
+                                    <thead>
+                                        <tr>
+                                            <th>Subscription</th>
+                                            <th>Subnet Name</th>
+                                            <th>VNET Name</th>
+                                            <th>Classification</th>
+                                            <th>Risk Level</th>
+                                            <th>Recommended Action</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody>
+                                        {{ subnet_impact_rows }}
+                                    </tbody>
+                                </table>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="section">
+                        <div class="section-header">
+                            <h2>Subscription Summary</h2>
+                        </div>
+                        <div class="section-content">
+                            <div class="table-container">
+                                <table class="data-table">
+                                    <thead>
+                                        <tr>
+                                            <th>Subscription</th>
+                                            <th>Total VNETs</th>
+                                            <th>Needs Remediation</th>
+                                            <th>Not Affected</th>
+                                            <th>Impact %</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody>
+                                        {{ subscription_summary_rows }}
+                                    </tbody>
+                                </table>
+                            </div>
+                        </div>
+                    </div>
+                </section>
+
+                <section id="remediation">
+                    <div class="remediation-guidance">
+                        <h3><i class="fas fa-lightbulb"></i> Remediation Guidance</h3>
+                        <div class="remediation-item">
+                            <strong>Quick Remediation Subnets:</strong> Add a route table with a default route (0.0.0.0/0) pointing to your preferred next hop, or deploy a NAT Gateway for managed outbound connectivity.
+                        </div>
+                        <div class="remediation-item">
+                            <strong>Mixed-Mode Subnets:</strong> Consider restructuring the subnet to separate resources with public IPs from those without, or implement a consistent connectivity strategy across all resources.
+                        </div>
+                        <div class="remediation-item">
+                            <strong>VNets with Insufficient Route Tables:</strong> Add additional route tables to ensure proper network virtual appliance (NVA) load balancing and redundancy.
+                        </div>
+                    </div>
+                </section>
+
+                <section id="subscription-details">
+                    <!-- Subscription Details -->
+                    <div class="section">
+                        <div class="section-header">
+                            <h2>Detailed Subscription Analysis</h2>
+                        </div>
+                        <div class="section-content">
+                            {{ subscription_details }}
+                        </div>
+                    </div>
+                </section>
+            </div>
+
+            <div class="footer">
+                <div class="logo">Azure Assessment Tool</div>
+                <div>Powered by Aviatrix Systems, Inc. | Copyright © 2025 All rights reserved.</div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        document.addEventListener('DOMContentLoaded', function() {
+            // Initialize collapsible sections
+            var coll = document.getElementsByClassName("collapsible");
+            
+            for (let i = 0; i < coll.length; i++) {
+                coll[i].addEventListener("click", function() {
+                    this.classList.toggle("active");
+                    var content = this.nextElementSibling;
+                    if (content.style.maxHeight) {
+                        content.style.maxHeight = null;
+                    } else {
+                        content.style.maxHeight = content.scrollHeight + "px";
+                    } 
+                });
+            }
+
+            // Navigation interactions with smooth scrolling
+            const navItems = document.querySelectorAll('.nav-item');
+            navItems.forEach(item => {
+                item.addEventListener('click', function() {
+                    // Remove active class from all items
+                    navItems.forEach(nav => nav.classList.remove('active'));
+                    // Add active class to clicked item
+                    this.classList.add('active');
+                    
+                    // Get target section
+                    const targetId = this.getAttribute('data-target');
+                    const targetSection = document.getElementById(targetId);
+                    
+                    if (targetSection) {
+                        // Smooth scroll to section
+                        targetSection.scrollIntoView({
+                            behavior: 'smooth',
+                            block: 'start'
+                        });
+                    }
+                });
+            });
+        });
+
+        // Charts
+        window.onload = function() {
+            // Modern chart color palette matching Aviatrix design
+            const colors = {
+                primary: '#3498db',
+                success: '#27ae60',
+                warning: '#f39c12',
+                danger: '#e74c3c',
+                info: '#17a2b8',
+                light: '#f8f9fa',
+                dark: '#2c3e50'
+            };
+
+            const chartOptions = {
+                responsive: true,
+                maintainAspectRatio: false,
+                cutout: '65%',
+                layout: {
+                    padding: 20
+                },
+                plugins: {
+                    legend: {
+                        position: 'bottom',
+                        labels: {
+                            padding: 20,
+                            usePointStyle: true,
+                            pointStyle: 'circle',
+                            font: {
+                                size: 12,
+                                family: '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif'
+                            }
+                        }
+                    },
+                    tooltip: {
+                        backgroundColor: 'rgba(44, 62, 80, 0.95)',
+                        titleFont: {
+                            size: 14,
+                            family: '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif'
+                        },
+                        bodyFont: {
+                            size: 13,
+                            family: '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif'
+                        },
+                        padding: 12,
+                        cornerRadius: 8,
+                        displayColors: true,
+                        callbacks: {
+                            label: function(context) {
+                                const value = context.raw;
+                                const total = context.dataset.data.reduce((a, b) => a + b, 0);
+                                const percentage = ((value / total) * 100).toFixed(1);
+                                return `${context.label}: ${value} subnets (${percentage}%)`;
+                            }
+                        }
+                    }
+                }
+            };
+
+            // Impact Chart
+            const impactCtx = document.getElementById('impactChart').getContext('2d');
+            new Chart(impactCtx, {
+                type: 'doughnut',
+                data: {
+                    labels: ['Affected', 'Not Affected'],
+                    datasets: [{
+                        data: [{{ total_affected_subnets }}, {{ total_subnets - total_affected_subnets }}],
+                        backgroundColor: [colors.warning, colors.success],
+                        borderWidth: 0,
+                        hoverBorderWidth: 2,
+                        hoverBorderColor: 'white'
+                    }]
+                },
+                options: chartOptions
+            });
+            
+            // Classification Chart
+            const classCtx = document.getElementById('classificationChart').getContext('2d');
+            new Chart(classCtx, {
+                type: 'doughnut',
+                data: {
+                    labels: ['Not Affected', 'Quick Remediation', 'Mixed-Mode'],
+                    datasets: [{
+                        data: [{{ total_not_affected }}, {{ total_quick_remediation }}, {{ total_mixed_mode }}],
+                        backgroundColor: [colors.success, colors.warning, colors.danger],
+                        borderWidth: 0,
+                        hoverBorderWidth: 2,
+                        hoverBorderColor: 'white'
+                    }]
+                },
+                options: chartOptions
+            });
+        };
+    </script>
+</body>
+</html>

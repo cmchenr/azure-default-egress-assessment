@@ -35,6 +35,14 @@ except ImportError:
     print("Please install required packages using: pip install azure-identity azure-mgmt-resource azure-mgmt-network azure-mgmt-subscription")
     sys.exit(1)
 
+# Try to import Jinja2 for template rendering
+try:
+    from jinja2 import Template, FileSystemLoader, Environment
+except ImportError:
+    print("Error: Jinja2 library not found.")
+    print("Please install Jinja2 using: pip install Jinja2")
+    sys.exit(1)
+
 # ANSI color codes for terminal output
 class Colors:
     HEADER = '\033[95m'
@@ -59,6 +67,12 @@ class AzureEgressAssessment:
         self.assessment_data = {}
         self.start_time = datetime.datetime.now()
         self.report_filename = f"azure-egress-assessment-{self.start_time.strftime('%Y%m%d-%H%M%S')}"
+        
+        # Template path - look for template in templates subfolder
+        self.template_path = os.path.join(os.path.dirname(__file__), 'templates', 'report_template.html')
+        if not os.path.exists(self.template_path):
+            # Fallback to current directory
+            self.template_path = os.path.join(os.path.dirname(__file__), 'report_template.html')
         
         # Progress tracking
         self.total_resources = 0
@@ -423,8 +437,241 @@ class AzureEgressAssessment:
             print(f"CSV Export: {Colors.UNDERLINE}{self.report_filename}.csv{Colors.ENDC}")
     
     def generate_html_report(self):
-        """Generate a detailed HTML report"""
+        """Generate a detailed HTML report using the template"""
         print(f"\n{Colors.HEADER}Generating HTML report...{Colors.ENDC}")
+        
+        try:
+            # Check if template exists
+            if not os.path.exists(self.template_path):
+                print(f"{Colors.RED}✗ Template not found at: {self.template_path}{Colors.ENDC}")
+                print(f"{Colors.YELLOW}! Falling back to inline HTML generation{Colors.ENDC}")
+                return self._generate_fallback_html_report()
+            
+            # Calculate summary statistics
+            template_data = self._prepare_template_data()
+            
+            # Load and render template
+            with open(self.template_path, 'r', encoding='utf-8') as f:
+                template_content = f.read()
+            
+            template = Template(template_content)
+            html_content = template.render(**template_data)
+            
+            # Write HTML report
+            with open(f"{self.report_filename}.html", "w", encoding='utf-8') as f:
+                f.write(html_content)
+                
+            print(f"{Colors.GREEN}✓ HTML report generated: {self.report_filename}.html{Colors.ENDC}")
+            
+        except Exception as e:
+            print(f"{Colors.RED}✗ Error generating HTML report: {str(e)}{Colors.ENDC}")
+            if self.args.verbose:
+                import traceback
+                traceback.print_exc()
+            
+            # Try fallback generation
+            print(f"{Colors.YELLOW}! Attempting fallback HTML generation{Colors.ENDC}")
+            self._generate_fallback_html_report()
+    
+    def _prepare_template_data(self):
+        """Prepare data for template rendering"""
+        # Calculate summary statistics
+        total_vnets = 0
+        total_subnets = 0
+        total_affected_subnets = 0
+        total_quick_remediation = 0
+        total_mixed_mode = 0
+        total_not_affected = 0
+        total_vnets_insufficient_rt = 0
+        
+        for sub_id, sub_data in self.assessment_data.items():
+            sub_vnets = len(sub_data['vnets'])
+            total_vnets += sub_vnets
+            
+            for vnet_id, vnet_data in sub_data['vnets'].items():
+                vnet_subnets = len(vnet_data['subnets'])
+                total_subnets += vnet_subnets
+                total_affected_subnets += vnet_data['affected_subnets_count']
+                
+                if vnet_data.get('insufficient_route_tables', False):
+                    total_vnets_insufficient_rt += 1
+                
+                for subnet_id, subnet_data in vnet_data['subnets'].items():
+                    if subnet_data['classification'] == 'Not Affected':
+                        total_not_affected += 1
+                    elif subnet_data['classification'] == 'Quick Remediation':
+                        total_quick_remediation += 1
+                    elif subnet_data['classification'] == 'Mixed-Mode':
+                        total_mixed_mode += 1
+        
+        # Calculate impact percentage
+        impact_percentage = 0
+        if total_subnets > 0:
+            impact_percentage = round((total_affected_subnets / total_subnets) * 100, 1)
+        
+        # Generate table rows and content
+        subnet_impact_rows = self._generate_subnet_impact_rows()
+        subscription_summary_rows = self._generate_subscription_summary_rows()
+        subscription_details = self._generate_subscription_details()
+        
+        # Prepare template data
+        template_data = {
+            'generated_date': self.start_time.strftime('%B %d, %Y at %I:%M %p'),
+            'last_updated': self.start_time.strftime('%Y-%m-%d %H:%M:%S'),
+            'subscriptions_count': len(self.assessment_data),
+            'total_vnets': total_vnets,
+            'total_subnets': total_subnets,
+            'impact_percentage': impact_percentage,
+            'total_affected_subnets': total_affected_subnets,
+            'total_not_affected': total_not_affected,
+            'total_quick_remediation': total_quick_remediation,
+            'total_mixed_mode': total_mixed_mode,
+            'subnet_impact_rows': subnet_impact_rows,
+            'subscription_summary_rows': subscription_summary_rows,
+            'subscription_details': subscription_details
+        }
+        
+        return template_data
+    
+    def _generate_subnet_impact_rows(self):
+        """Generate HTML table rows for subnet impact analysis"""
+        rows = []
+        
+        for sub_id, sub_data in self.assessment_data.items():
+            for vnet_id, vnet_data in sub_data['vnets'].items():
+                for subnet_id, subnet_data in vnet_data['subnets'].items():
+                    classification = subnet_data['classification']
+                    
+                    # Determine risk level and remediation based on classification
+                    if classification == 'Not Affected':
+                        risk_level = 'None'
+                        remediation = 'No action needed'
+                        classification_class = 'status-not-affected'
+                        risk_class = 'risk-none'
+                    elif classification == 'Quick Remediation':
+                        risk_level = 'Medium'
+                        remediation = 'Add route table with default route or NAT Gateway'
+                        classification_class = 'status-quick-remediation'
+                        risk_class = 'risk-medium'
+                    else:  # Mixed-Mode
+                        risk_level = 'High'
+                        remediation = 'Review and plan mixed-mode migration'
+                        classification_class = 'status-mixed-mode'
+                        risk_class = 'risk-high'
+                    
+                    row = f"""
+                    <tr>
+                        <td>{sub_data['display_name']}</td>
+                        <td>{subnet_data['name']}</td>
+                        <td>{vnet_data['name']}</td>
+                        <td><span class="status-badge {classification_class}">{classification}</span></td>
+                        <td><span class="{risk_class}">{risk_level}</span></td>
+                        <td>{remediation}</td>
+                    </tr>"""
+                    rows.append(row)
+        
+        return '\n'.join(rows)
+    
+    def _generate_subscription_summary_rows(self):
+        """Generate HTML table rows for subscription summary"""
+        rows = []
+        
+        for sub_id, sub_data in self.assessment_data.items():
+            vnets_total = len(sub_data['vnets'])
+            vnets_affected = 0
+            vnets_not_affected = 0
+            
+            for vnet_id, vnet_data in sub_data['vnets'].items():
+                if vnet_data['affected_subnets_count'] > 0:
+                    vnets_affected += 1
+                else:
+                    vnets_not_affected += 1
+            
+            impact_percentage = (vnets_affected / vnets_total * 100) if vnets_total > 0 else 0
+            
+            row = f"""
+            <tr>
+                <td>{sub_data['display_name']}</td>
+                <td>{vnets_total}</td>
+                <td>{vnets_affected}</td>
+                <td>{vnets_not_affected}</td>
+                <td>{impact_percentage:.1f}%</td>
+            </tr>"""
+            rows.append(row)
+        
+        return '\n'.join(rows)
+    
+    def _generate_subscription_details(self):
+        """Generate collapsible subscription details content"""
+        details = []
+        
+        for sub_id, sub_data in self.assessment_data.items():
+            sub_name = sub_data['display_name']
+            sub_vnets = len(sub_data['vnets'])
+            
+            detail_section = f"""
+            <button class="collapsible">Subscription: {sub_name} ({sub_id}) - {sub_vnets} VNets</button>
+            <div class="collapsible-content">
+                <div class="section-content">"""
+            
+            # Add VNet details
+            for vnet_id, vnet_data in sub_data['vnets'].items():
+                vnet_name = vnet_data['name']
+                resource_group = vnet_data['resource_group']
+                address_space = ", ".join(vnet_data['address_space'])
+                subnets_count = len(vnet_data['subnets'])
+                affected_count = vnet_data['affected_subnets_count']
+                route_tables_count = vnet_data['route_tables_count']
+                insufficient_rt = vnet_data.get('insufficient_route_tables', False)
+                
+                detail_section += f"""
+                <div class="vnet-detail">
+                    <h4>{vnet_name}</h4>
+                    <p><strong>Resource Group:</strong> {resource_group}</p>
+                    <p><strong>Address Space:</strong> {address_space}</p>
+                    <p><strong>Subnets:</strong> {subnets_count} total, {affected_count} affected</p>
+                    <p><strong>Route Tables:</strong> {route_tables_count} 
+                        {f'<span class="status-badge status-insufficient-rt">Insufficient for NVA Redundancy</span>' if insufficient_rt else ''}
+                    </p>"""
+                
+                if subnets_count > 0:
+                    detail_section += """
+                    <h5>Subnets</h5>
+                    <ul>"""
+                    
+                    # Add subnet details
+                    for subnet_id, subnet_data in vnet_data['subnets'].items():
+                        subnet_name = subnet_data['name']
+                        classification = subnet_data['classification']
+                        address_prefix = subnet_data['address_prefix']
+                        
+                        if classification == 'Not Affected':
+                            classification_class = 'status-not-affected'
+                        elif classification == 'Quick Remediation':
+                            classification_class = 'status-quick-remediation'
+                        else:
+                            classification_class = 'status-mixed-mode'
+                        
+                        detail_section += f"""
+                        <li>{subnet_name} ({address_prefix}): <span class="status-badge {classification_class}">{classification}</span></li>"""
+                    
+                    detail_section += """
+                    </ul>"""
+                
+                detail_section += """
+                </div>"""
+            
+            detail_section += """
+                </div>
+            </div>"""
+            
+            details.append(detail_section)
+        
+        return '\n'.join(details)
+    
+    def _generate_fallback_html_report(self):
+        """Generate HTML report using the old inline method when template is not available"""
+        print(f"{Colors.YELLOW}! Using fallback HTML generation{Colors.ENDC}")
         
         try:
             # Calculate summary statistics
@@ -456,7 +703,7 @@ class AzureEgressAssessment:
                         elif subnet_data['classification'] == 'Mixed-Mode':
                             total_mixed_mode += 1
             
-            # Generate HTML content
+            # Generate HTML content using the existing method
             html_content = self._generate_html_content(
                 total_vnets, total_subnets, total_affected_subnets,
                 total_quick_remediation, total_mixed_mode, total_not_affected,
@@ -464,13 +711,13 @@ class AzureEgressAssessment:
             )
             
             # Write HTML report
-            with open(f"{self.report_filename}.html", "w") as f:
+            with open(f"{self.report_filename}.html", "w", encoding='utf-8') as f:
                 f.write(html_content)
                 
-            print(f"{Colors.GREEN}✓ HTML report generated: {self.report_filename}.html{Colors.ENDC}")
+            print(f"{Colors.GREEN}✓ Fallback HTML report generated: {self.report_filename}.html{Colors.ENDC}")
             
         except Exception as e:
-            print(f"{Colors.RED}✗ Error generating HTML report: {str(e)}{Colors.ENDC}")
+            print(f"{Colors.RED}✗ Error generating fallback HTML report: {str(e)}{Colors.ENDC}")
             if self.args.verbose:
                 import traceback
                 traceback.print_exc()
