@@ -21,8 +21,11 @@ GITHUB_REPO="cmchenr/azure-default-egress-assessment"
 GITHUB_BRANCH="main"
 # URLs for script download
 SCRIPT_URL="https://raw.githubusercontent.com/$GITHUB_REPO/$GITHUB_BRANCH/scripts/azure_egress_assessment.py"
-# Temp file path for downloaded script
-SCRIPT_PATH="$(mktemp -t azure_egress_assessment.XXXXXX.py)"
+TEMPLATE_URL="https://raw.githubusercontent.com/$GITHUB_REPO/$GITHUB_BRANCH/scripts/templates/report_template.html"
+# Temp directory and file paths for downloaded files
+TEMP_DIR="$(mktemp -d -t azure_egress_assessment.XXXXXX)"
+SCRIPT_PATH="$TEMP_DIR/azure_egress_assessment.py"
+TEMPLATE_PATH="$TEMP_DIR/report_template.html"
 REQUIREMENTS=(
     "azure-identity"
     "azure-mgmt-resource"
@@ -105,15 +108,17 @@ install_packages() {
     echo -e "${GREEN}All required packages installed successfully.${NC}"
 }
 
-# Function to download the assessment script
+# Function to download the assessment script and template
 download_script() {
-    echo -e "\n${BLUE}Downloading the Azure Egress Assessment script from GitHub...${NC}"
+    echo -e "\n${BLUE}Downloading the Azure Egress Assessment script and template from GitHub...${NC}"
     
-    # Download from GitHub
+    # Download the main script from GitHub
     if command_exists curl; then
         curl -s -L -o "$SCRIPT_PATH" "$SCRIPT_URL"
+        curl -s -L -o "$TEMPLATE_PATH" "$TEMPLATE_URL"
     elif command_exists wget; then
         wget -q -O "$SCRIPT_PATH" "$SCRIPT_URL"
+        wget -q -O "$TEMPLATE_PATH" "$TEMPLATE_URL"
     else
         echo -e "${RED}Error: Neither curl nor wget found. Cannot download the script.${NC}"
         exit 1
@@ -125,6 +130,14 @@ download_script() {
     else
         echo -e "${RED}Error: Failed to download the script from GitHub.${NC}"
         echo -e "${RED}URL: $SCRIPT_URL${NC}"
+        exit 1
+    fi
+    
+    if [ -f "$TEMPLATE_PATH" ]; then
+        echo -e "${GREEN}Report template downloaded successfully from GitHub.${NC}"
+    else
+        echo -e "${RED}Error: Failed to download the template from GitHub.${NC}"
+        echo -e "${RED}URL: $TEMPLATE_URL${NC}"
         exit 1
     fi
 }
@@ -172,8 +185,8 @@ main() {
     # Check for Python 3.6+
     PYTHON_EXE=$(get_python_executable)
     
-    # Create a trap to clean up the temp file on exit
-    trap 'rm -f "$SCRIPT_PATH"; echo -e "\n${BLUE}Cleaning up temporary files...${NC}"' EXIT
+    # Create a trap to clean up the temp directory on exit
+    trap 'rm -rf "$TEMP_DIR"; echo -e "\n${BLUE}Cleaning up temporary files...${NC}"' EXIT
     
     if [ -z "$PYTHON_EXE" ]; then
         echo -e "${RED}Error: Python 3.6+ is required but not found.${NC}"
