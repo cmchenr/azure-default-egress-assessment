@@ -32,6 +32,7 @@ REQUIREMENTS=(
     "azure-mgmt-resource"
     "azure-mgmt-network"
     "azure-mgmt-subscription"
+    "Jinja2"
 )
 
 # Print banner
@@ -106,65 +107,65 @@ check_python_version() {
 setup_virtual_environment() {
     local python_exe=$1
 
-    echo -e "\n${BLUE}Creating virtual environment for package isolation...${NC}"
-    echo -e "${BLUE}This avoids conflicts with system Python packages.${NC}"
+    echo -e "\n${BLUE}Creating virtual environment for package isolation...${NC}" >&2
+    echo -e "${BLUE}This avoids conflicts with system Python packages.${NC}" >&2
 
     # Create virtual environment
-    echo -e "${BLUE}Creating virtual environment at: $VENV_PATH${NC}"
+    echo -e "${BLUE}Creating virtual environment at: $VENV_PATH${NC}" >&2
     if ! $python_exe -m venv "$VENV_PATH" 2>/dev/null; then
-        echo -e "${YELLOW}Failed to create virtual environment. This might be due to missing venv module.${NC}"
+        echo -e "${YELLOW}Failed to create virtual environment. This might be due to missing venv module.${NC}" >&2
         
         # Detect operating system and provide appropriate guidance
         if [[ "$OSTYPE" == "darwin"* ]]; then
             # macOS
-            echo -e "${BLUE}Detected macOS. Checking Python installation...${NC}"
-            echo -e "${YELLOW}On macOS, venv should be included with Python 3.3+${NC}"
+            echo -e "${BLUE}Detected macOS. Checking Python installation...${NC}" >&2
+            echo -e "${YELLOW}On macOS, venv should be included with Python 3.3+${NC}" >&2
             
             if command_exists brew; then
-                echo -e "${BLUE}Homebrew detected. You might want to try:${NC}"
-                echo -e "${YELLOW}  brew install python3${NC}"
-                echo -e "${YELLOW}Or ensure you're using Homebrew Python:${NC}"
-                echo -e "${YELLOW}  which python3${NC}"
+                echo -e "${BLUE}Homebrew detected. You might want to try:${NC}" >&2
+                echo -e "${YELLOW}  brew install python3${NC}" >&2
+                echo -e "${YELLOW}Or ensure you're using Homebrew Python:${NC}" >&2
+                echo -e "${YELLOW}  which python3${NC}" >&2
             else
-                echo -e "${YELLOW}Consider installing Homebrew and Python via Homebrew:${NC}"
-                echo -e "${YELLOW}  /bin/bash -c \"\$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)\"${NC}"
-                echo -e "${YELLOW}  brew install python3${NC}"
+                echo -e "${YELLOW}Consider installing Homebrew and Python via Homebrew:${NC}" >&2
+                echo -e "${YELLOW}  /bin/bash -c \"\$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)\"${NC}" >&2
+                echo -e "${YELLOW}  brew install python3${NC}" >&2
             fi
             
-            echo -e "${RED}Error: Cannot create virtual environment on macOS.${NC}"
-            echo -e "${YELLOW}Please ensure you have a working Python 3.6+ installation.${NC}"
+            echo -e "${RED}Error: Cannot create virtual environment on macOS.${NC}" >&2
+            echo -e "${YELLOW}Please ensure you have a working Python 3.6+ installation.${NC}" >&2
             exit 1
             
         elif command_exists apt-get; then
-            echo -e "${BLUE}Installing python3-venv (Ubuntu/Debian)...${NC}"
+            echo -e "${BLUE}Installing python3-venv (Ubuntu/Debian)...${NC}" >&2
             sudo apt-get update && sudo apt-get install -y python3-venv
         elif command_exists yum; then
-            echo -e "${BLUE}Installing python3-venv (RHEL/CentOS)...${NC}"
+            echo -e "${BLUE}Installing python3-venv (RHEL/CentOS)...${NC}" >&2
             sudo yum install -y python3-venv
         elif command_exists dnf; then
-            echo -e "${BLUE}Installing python3-venv (Fedora)...${NC}"
+            echo -e "${BLUE}Installing python3-venv (Fedora)...${NC}" >&2
             sudo dnf install -y python3-venv
         else
-            echo -e "${RED}Error: Could not install venv module automatically.${NC}"
-            echo -e "${YELLOW}Please install manually based on your OS:${NC}"
-            echo -e "${YELLOW}  Ubuntu/Debian: sudo apt-get install python3-venv${NC}"
-            echo -e "${YELLOW}  RHEL/CentOS:   sudo yum install python3-venv${NC}"
-            echo -e "${YELLOW}  Fedora:        sudo dnf install python3-venv${NC}"
-            echo -e "${YELLOW}  macOS:         brew install python3${NC}"
+            echo -e "${RED}Error: Could not install venv module automatically.${NC}" >&2
+            echo -e "${YELLOW}Please install manually based on your OS:${NC}" >&2
+            echo -e "${YELLOW}  Ubuntu/Debian: sudo apt-get install python3-venv${NC}" >&2
+            echo -e "${YELLOW}  RHEL/CentOS:   sudo yum install python3-venv${NC}" >&2
+            echo -e "${YELLOW}  Fedora:        sudo dnf install python3-venv${NC}" >&2
+            echo -e "${YELLOW}  macOS:         brew install python3${NC}" >&2
             exit 1
         fi
         
         # Try creating venv again (only for Linux systems)
         if [[ "$OSTYPE" != "darwin"* ]]; then
             if ! $python_exe -m venv "$VENV_PATH"; then
-                echo -e "${RED}Error: Still unable to create virtual environment.${NC}"
-                echo -e "${YELLOW}Please check your Python installation.${NC}"
+                echo -e "${RED}Error: Still unable to create virtual environment.${NC}" >&2
+                echo -e "${YELLOW}Please check your Python installation.${NC}" >&2
                 exit 1
             fi
         fi
     fi
     
-    echo -e "${GREEN}✓ Virtual environment created successfully${NC}"
+    echo -e "${GREEN}✓ Virtual environment created successfully${NC}" >&2
 
     # Activate virtual environment
     source "$VENV_PATH/bin/activate"
@@ -172,23 +173,23 @@ setup_virtual_environment() {
     # Get the virtual environment Python executable
     local venv_python="$VENV_PATH/bin/python"
     
-    echo -e "${BLUE}Using virtual environment Python: $($venv_python --version)${NC}"
+    echo -e "${BLUE}Using virtual environment Python: $($venv_python --version)${NC}" >&2
 
     # Update pip in virtual environment
-    echo -e "${BLUE}Updating pip in virtual environment...${NC}"
+    echo -e "${BLUE}Updating pip in virtual environment...${NC}" >&2
     $venv_python -m pip install --upgrade pip --quiet
 
     # Install each required package in virtual environment
-    echo -e "${BLUE}Installing required packages in virtual environment...${NC}"
+    echo -e "${BLUE}Installing required packages in virtual environment...${NC}" >&2
     for package in "${REQUIREMENTS[@]}"; do
-        echo -e "${BLUE}Installing $package...${NC}"
+        echo -e "${BLUE}Installing $package...${NC}" >&2
         if ! $venv_python -m pip install --upgrade $package --quiet; then
-            echo -e "${RED}Error: Failed to install $package in virtual environment.${NC}"
+            echo -e "${RED}Error: Failed to install $package in virtual environment.${NC}" >&2
             exit 1
         fi
     done
 
-    echo -e "${GREEN}✓ All required packages installed successfully in virtual environment${NC}"
+    echo -e "${GREEN}✓ All required packages installed successfully in virtual environment${NC}" >&2
     
     # Return the virtual environment python path
     echo "$venv_python"
