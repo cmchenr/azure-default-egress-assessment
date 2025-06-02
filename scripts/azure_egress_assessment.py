@@ -210,26 +210,48 @@ class AzureEgressAssessment:
             for subnet in subnets:
                 self.process_subnet(network_client, subnet, vnet, subscription_id)
             
-            # Analyze VNet-level capabilities
+            # Analyze VNet-level capabilities and subnet classifications
             has_nat_gateway = False
             has_default_route_udr = False
+            has_affected_subnets = False
+            has_mixed_mode_subnets = False
+            has_default_egress_subnets = False
             
             for subnet_id, subnet_data in self.assessment_data[subscription_id]['vnets'][vnet.id]['subnets'].items():
                 if subnet_data.get('nat_gateway_id'):
                     has_nat_gateway = True
                 if subnet_data.get('has_default_route'):
                     has_default_route_udr = True
+                
+                # Check subnet classifications to determine VNet impact
+                subnet_classification = subnet_data.get('classification', 'Not Affected')
+                if subnet_classification == 'Affected: Mixed-Mode':
+                    has_affected_subnets = True
+                    has_mixed_mode_subnets = True
+                elif subnet_classification == 'Affected: Default Egress':
+                    has_affected_subnets = True
+                    has_default_egress_subnets = True
             
             self.assessment_data[subscription_id]['vnets'][vnet.id]['has_nat_gateway'] = has_nat_gateway
             self.assessment_data[subscription_id]['vnets'][vnet.id]['has_default_route_udr'] = has_default_route_udr
             
-            # Classify VNet based on egress mechanisms detected
-            if has_default_route_udr:
-                self.assessment_data[subscription_id]['vnets'][vnet.id]['classification'] = 'Ready: Secure'
+            # Classify VNet based on subnet impact and egress mechanisms detected
+            if has_affected_subnets:
+                # VNet has affected subnets, so it should be classified as affected
+                if has_mixed_mode_subnets and has_default_egress_subnets:
+                    self.assessment_data[subscription_id]['vnets'][vnet.id]['classification'] = 'Affected: Mixed'
+                elif has_mixed_mode_subnets:
+                    self.assessment_data[subscription_id]['vnets'][vnet.id]['classification'] = 'Affected: Mixed-Mode'
+                elif has_default_egress_subnets:
+                    self.assessment_data[subscription_id]['vnets'][vnet.id]['classification'] = 'Affected: Default Egress'
+                else:
+                    self.assessment_data[subscription_id]['vnets'][vnet.id]['classification'] = 'Affected'
+            elif has_default_route_udr:
+                self.assessment_data[subscription_id]['vnets'][vnet.id]['classification'] = 'Not Affected'
             elif has_nat_gateway:
-                self.assessment_data[subscription_id]['vnets'][vnet.id]['classification'] = 'Ready: Insecure'
+                self.assessment_data[subscription_id]['vnets'][vnet.id]['classification'] = 'Not Affected'
             else:
-                self.assessment_data[subscription_id]['vnets'][vnet.id]['classification'] = 'Not Ready'
+                self.assessment_data[subscription_id]['vnets'][vnet.id]['classification'] = 'Not Affected'
             
             self.update_progress()
             
@@ -554,11 +576,27 @@ class AzureEgressAssessment:
                 sub_affected_subnets += vnet_affected_count
                 
                 # VNet classification counts
-                vnet_classification = vnet_data.get('classification', 'Not Ready')
-                if vnet_classification == 'Ready: Secure':
-                    sub_vnets_ready_secure += 1
-                elif vnet_classification == 'Ready: Insecure':
-                    sub_vnets_ready_insecure += 1
+                vnet_classification = vnet_data.get('classification', 'Not Affected')
+                if vnet_classification.startswith('Affected'):
+                    sub_vnets_not_ready += 1  # VNets with affected subnets need attention
+                elif vnet_classification == 'Not Affected':
+                    # Check if all subnets are secure (have UDR or NAT gateway)
+                    all_subnets_secure = True
+                    for subnet_id, subnet_data in vnet_data['subnets'].items():
+                        subnet_reason = subnet_data.get('reason', '')
+                        if not (subnet_reason == 'No Workloads' or 
+                               subnet_reason == 'Public Subnet' or 
+                               subnet_reason == 'Azure NAT Gateway' or 
+                               'UDR with 0.0.0.0/0' in subnet_reason):
+                            all_subnets_secure = False
+                            break
+                    
+                    if all_subnets_secure and (vnet_data.get('has_nat_gateway') or vnet_data.get('has_default_route_udr')):
+                        sub_vnets_ready_secure += 1
+                    elif vnet_data.get('has_nat_gateway'):
+                        sub_vnets_ready_insecure += 1
+                    else:
+                        sub_vnets_ready_secure += 1  # Default for not affected
                 else:
                     sub_vnets_not_ready += 1
                 
@@ -709,11 +747,27 @@ class AzureEgressAssessment:
             
             for vnet_id, vnet_data in sub_data['vnets'].items():
                 # VNet classification
-                vnet_classification = vnet_data.get('classification', 'Not Ready')
-                if vnet_classification == 'Ready: Secure':
-                    vnets_ready_secure += 1
-                elif vnet_classification == 'Ready: Insecure':
-                    vnets_ready_insecure += 1
+                vnet_classification = vnet_data.get('classification', 'Not Affected')
+                if vnet_classification.startswith('Affected'):
+                    vnets_not_ready += 1  # VNets with affected subnets need attention
+                elif vnet_classification == 'Not Affected':
+                    # Check if all subnets are secure (have UDR or NAT gateway)
+                    all_subnets_secure = True
+                    for subnet_id, subnet_data in vnet_data['subnets'].items():
+                        subnet_reason = subnet_data.get('reason', '')
+                        if not (subnet_reason == 'No Workloads' or 
+                               subnet_reason == 'Public Subnet' or 
+                               subnet_reason == 'Azure NAT Gateway' or 
+                               'UDR with 0.0.0.0/0' in subnet_reason):
+                            all_subnets_secure = False
+                            break
+                    
+                    if all_subnets_secure and (vnet_data.get('has_nat_gateway') or vnet_data.get('has_default_route_udr')):
+                        vnets_ready_secure += 1
+                    elif vnet_data.get('has_nat_gateway'):
+                        vnets_ready_insecure += 1
+                    else:
+                        vnets_ready_secure += 1  # Default for not affected
                 else:
                     vnets_not_ready += 1
                 
@@ -972,15 +1026,15 @@ class AzureEgressAssessment:
         
         for sub_id, sub_data in self.assessment_data.items():
             for vnet_id, vnet_data in sub_data['vnets'].items():
-                classification = vnet_data.get('classification', 'Not Ready')
+                classification = vnet_data.get('classification', 'Not Affected')
                 
                 # Determine classification styling
-                if classification == 'Ready: Secure':
-                    classification_class = 'status-ready-secure'
-                elif classification == 'Ready: Insecure':
-                    classification_class = 'status-ready-insecure'
+                if classification.startswith('Affected'):
+                    classification_class = 'status-affected-default'
+                elif classification == 'Not Affected':
+                    classification_class = 'status-not-affected'
                 else:
-                    classification_class = 'status-not-ready'
+                    classification_class = 'status-unknown'
                 
                 # Collect egress mechanisms used across all subnets in this VNet
                 egress_mechanisms = set()
@@ -1114,7 +1168,16 @@ class AzureEgressAssessment:
                         affected_count += 1
                 
                 # Get VNet classification and capabilities
-                vnet_classification = vnet_data.get('classification', 'Not Ready')
+                vnet_classification = vnet_data.get('classification', 'Not Affected')
+                
+                # Determine VNet classification CSS class
+                if vnet_classification.startswith('Affected'):
+                    vnet_class = 'status-affected-default'
+                elif vnet_classification == 'Not Affected':
+                    vnet_class = 'status-not-affected'
+                else:
+                    vnet_class = 'status-unknown'
+                    
                 capabilities = []
                 if vnet_data.get('has_nat_gateway', False):
                     capabilities.append('NAT Gateway')
@@ -1127,7 +1190,7 @@ class AzureEgressAssessment:
                     <h4>{vnet_name}</h4>
                     <p><strong>Resource Group:</strong> {resource_group}</p>
                     <p><strong>Address Space:</strong> {address_space}</p>
-                    <p><strong>Classification:</strong> <span class="status-badge">{vnet_classification}</span></p>
+                    <p><strong>Classification:</strong> <span class="status-badge {vnet_class}">{vnet_classification}</span></p>
                     <p><strong>Capabilities:</strong> {capabilities_str}</p>
                     <p><strong>Subnets:</strong> {subnets_count} total, {affected_count} affected</p>"""
                 

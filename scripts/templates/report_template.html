@@ -414,6 +414,16 @@
             color: #155724;
         }
 
+        .status-affected-default {
+            background: #fff3cd;
+            color: #856404;
+        }
+
+        .status-affected-mixed {
+            background: #f8d7da;
+            color: #721c24;
+        }
+
         .status-quick-remediation {
             background: #fff3cd;
             color: #856404;
@@ -427,6 +437,26 @@
         .status-insufficient-rt {
             background: #cce7ff;
             color: #004085;
+        }
+
+        .status-unknown {
+            background: #e9ecef;
+            color: #495057;
+        }
+
+        .status-ready-secure {
+            background: #d4edda;
+            color: #155724;
+        }
+
+        .status-ready-insecure {
+            background: #fff3cd;
+            color: #856404;
+        }
+
+        .status-not-ready {
+            background: #f8d7da;
+            color: #721c24;
         }
 
         .risk-high { color: #dc3545; }
@@ -585,7 +615,6 @@
                             <div class="content-body">
                 <section id="executive-summary">
                     <div class="alert alert-warning">
-                        <strong><i class="fas fa-exclamation-triangle"></i> Critical Action Required:</strong>
                         Azure is eliminating their default Egress feature on September 30th, 2025. New subnets will require an explicit egress mechanism. All recommended remediation options will require incremental spend. <a href="https://azure.microsoft.com/en-us/updates?id=default-outbound-access-for-vms-in-azure-will-be-retired-transition-to-a-new-method-of-internet-access" target="_blank" style="color: #000080; text-decoration: underline; font-weight: bold;">Official Azure Documentation <i class="fas fa-external-link-alt"></i></a>
                     </div>
 
