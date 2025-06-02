@@ -199,28 +199,37 @@ class AzureEgressAssessment:
                 'resource_group': resource_group,
                 'address_space': [prefix for prefix in vnet.address_space.address_prefixes] if vnet.address_space else [],
                 'subnets': {},
-                'route_tables_count': 0,
                 'subnets_count': len(subnets),
-                'affected_subnets_count': 0
+                'classification': 'Not Ready',  # Default VNet classification
+                'has_nat_gateway': False,
+                'has_default_route_udr': False,
+                'overlapping_cidrs': []
             }
             
             # Process subnets
             for subnet in subnets:
                 self.process_subnet(network_client, subnet, vnet, subscription_id)
             
-            # Count route tables
-            unique_route_tables = set()
+            # Analyze VNet-level capabilities
+            has_nat_gateway = False
+            has_default_route_udr = False
+            
             for subnet_id, subnet_data in self.assessment_data[subscription_id]['vnets'][vnet.id]['subnets'].items():
-                if subnet_data.get('route_table_id'):
-                    unique_route_tables.add(subnet_data['route_table_id'])
+                if subnet_data.get('nat_gateway_id'):
+                    has_nat_gateway = True
+                if subnet_data.get('has_default_route'):
+                    has_default_route_udr = True
             
-            self.assessment_data[subscription_id]['vnets'][vnet.id]['route_tables_count'] = len(unique_route_tables)
+            self.assessment_data[subscription_id]['vnets'][vnet.id]['has_nat_gateway'] = has_nat_gateway
+            self.assessment_data[subscription_id]['vnets'][vnet.id]['has_default_route_udr'] = has_default_route_udr
             
-            # Flag VNets with insufficient route tables for NVA redundancy
-            if len(unique_route_tables) < 2:
-                self.assessment_data[subscription_id]['vnets'][vnet.id]['insufficient_route_tables'] = True
+            # Classify VNet based on egress mechanisms detected
+            if has_default_route_udr:
+                self.assessment_data[subscription_id]['vnets'][vnet.id]['classification'] = 'Ready: Secure'
+            elif has_nat_gateway:
+                self.assessment_data[subscription_id]['vnets'][vnet.id]['classification'] = 'Ready: Insecure'
             else:
-                self.assessment_data[subscription_id]['vnets'][vnet.id]['insufficient_route_tables'] = False
+                self.assessment_data[subscription_id]['vnets'][vnet.id]['classification'] = 'Not Ready'
             
             self.update_progress()
             
@@ -248,8 +257,12 @@ class AzureEgressAssessment:
                 'nat_gateway_id': nat_gateway_id,
                 'network_interfaces': [],
                 'has_default_route': False,
+                'default_route_next_hop': None,
+                'default_route_next_hop_ip': None,
                 'uses_default_egress': True,  # Assume using default egress until proven otherwise
-                'classification': 'Not Affected'  # Default classification
+                'classification': 'Not Affected',  # Default classification
+                'egress_mechanism': 'Default',
+                'reason': ''
             }
             
             # Check if route table has a default route (0.0.0.0/0)
@@ -264,6 +277,11 @@ class AzureEgressAssessment:
                             subnet_data['has_default_route'] = True
                             subnet_data['uses_default_egress'] = False
                             subnet_data['default_route_next_hop'] = route.next_hop_type
+                            subnet_data['egress_mechanism'] = 'UDR'
+                            
+                            # Try to get the next hop IP if it's a Virtual Appliance
+                            if route.next_hop_type == 'VirtualAppliance' and hasattr(route, 'next_hop_ip_address'):
+                                subnet_data['default_route_next_hop_ip'] = route.next_hop_ip_address
                             break
                 except Exception as e:
                     print(f"{Colors.YELLOW}      ! Error fetching route table for subnet {subnet_name}: {str(e)}{Colors.ENDC}")
@@ -271,6 +289,7 @@ class AzureEgressAssessment:
             # If we have a NAT Gateway, subnet does not use default egress
             if nat_gateway_id:
                 subnet_data['uses_default_egress'] = False
+                subnet_data['egress_mechanism'] = 'NAT Gateway'
             
             # Get NICs in this subnet
             nic_count = 0
@@ -298,15 +317,39 @@ class AzureEgressAssessment:
                             'public_ip_id': ip_config.public_ip_address.id if has_public_ip else None
                         })
             
-            # Determine classification based on NICs and egress status
-            if not subnet_data['uses_default_egress'] or nic_count == 0:
+            # New classification logic based on updated README
+            if nic_count == 0:
                 subnet_data['classification'] = 'Not Affected'
-            elif nic_with_public_ip_count == 0 or nic_with_public_ip_count == nic_count:
-                subnet_data['classification'] = 'Quick Remediation'
-                self.assessment_data[subscription_id]['vnets'][vnet.id]['affected_subnets_count'] += 1
+                subnet_data['reason'] = 'No Workloads'
+            elif nic_with_public_ip_count == nic_count and nic_count > 0:
+                # All workloads have public IPs
+                subnet_data['classification'] = 'Not Affected'
+                subnet_data['reason'] = 'Public Subnet'
+            elif nat_gateway_id:
+                # NAT Gateway present
+                subnet_data['classification'] = 'Not Affected' 
+                subnet_data['reason'] = 'Azure NAT Gateway'
+            elif subnet_data['has_default_route']:
+                # UDR with 0.0.0.0/0 route
+                subnet_data['classification'] = 'Not Affected'
+                subnet_data['reason'] = f"UDR with 0.0.0.0/0 ({subnet_data['default_route_next_hop']})"
+            elif subnet_data['uses_default_egress']:
+                # Using default egress - check for mixed mode
+                if nic_with_public_ip_count > 0 and nic_with_public_ip_count < nic_count:
+                    # Mixed mode: some NICs with public IPs, some without
+                    subnet_data['classification'] = 'Affected: Mixed-Mode'
+                    subnet_data['reason'] = 'Mixed mode subnet'
+                else:
+                    # All NICs either have or don't have public IPs
+                    subnet_data['classification'] = 'Affected: Default Egress'
+                    subnet_data['reason'] = 'Using default egress'
             else:
-                subnet_data['classification'] = 'Mixed-Mode'
-                self.assessment_data[subscription_id]['vnets'][vnet.id]['affected_subnets_count'] += 1
+                subnet_data['classification'] = 'Not Affected'
+                subnet_data['reason'] = 'Explicit egress configured'
+            
+            # Store workload counts in subnet data
+            subnet_data['nic_count'] = nic_count
+            subnet_data['public_ip_count'] = nic_with_public_ip_count
             
             # Add subnet data to assessment
             self.assessment_data[subscription_id]['vnets'][vnet.id]['subnets'][subnet.id] = subnet_data
@@ -315,16 +358,119 @@ class AzureEgressAssessment:
             classification = subnet_data['classification']
             if classification == 'Not Affected':
                 classification_color = Colors.GREEN
-            elif classification == 'Quick Remediation':
+            elif classification == 'Affected: Default Egress':
                 classification_color = Colors.YELLOW
-            else:
+            else:  # Mixed-Mode
                 classification_color = Colors.RED
                 
-            print(f"    Subnet: {subnet_name} - {classification_color}{classification}{Colors.ENDC}")
+            print(f"    Subnet: {subnet_name} - {classification_color}{classification}{Colors.ENDC} ({subnet_data['reason']})")
             
         except Exception as e:
             print(f"{Colors.RED}    ✗ Error processing subnet {subnet_name}: {str(e)}{Colors.ENDC}")
     
+    def detect_cidr_overlaps(self):
+        """Detect VNets with overlapping CIDR ranges that cannot be connected to the same hub"""
+        import ipaddress
+        
+        print(f"{Colors.HEADER}Detecting CIDR overlaps...{Colors.ENDC}")
+        
+        # Collect all VNets with their CIDR ranges
+        vnet_list = []
+        for sub_id, sub_data in self.assessment_data.items():
+            for vnet_id, vnet_data in sub_data['vnets'].items():
+                for address_prefix in vnet_data['address_space']:
+                    try:
+                        network = ipaddress.ip_network(address_prefix, strict=False)
+                        vnet_list.append({
+                            'subscription_id': sub_id,
+                            'subscription_name': sub_data['display_name'],
+                            'vnet_id': vnet_id,
+                            'vnet_name': vnet_data['name'],
+                            'cidr': address_prefix,
+                            'network': network
+                        })
+                    except ValueError as e:
+                        print(f"{Colors.YELLOW}! Warning: Invalid CIDR {address_prefix} in VNet {vnet_data['name']}: {e}{Colors.ENDC}")
+                        continue
+        
+        # Find overlapping CIDRs using network overlap detection
+        overlaps_dict = {}
+        overlaps_list = []
+        
+        for i, vnet1 in enumerate(vnet_list):
+            for j, vnet2 in enumerate(vnet_list[i+1:], i+1):
+                # Skip if same VNet
+                if vnet1['vnet_id'] == vnet2['vnet_id']:
+                    continue
+                    
+                # Check for overlap (either direction)
+                network1 = vnet1['network']
+                network2 = vnet2['network']
+                
+                if network1.overlaps(network2):
+                    # Create overlap pair key for deduplication
+                    pair_key = tuple(sorted([
+                        f"{vnet1['subscription_id']}:{vnet1['vnet_id']}:{vnet1['cidr']}",
+                        f"{vnet2['subscription_id']}:{vnet2['vnet_id']}:{vnet2['cidr']}"
+                    ]))
+                    
+                    if pair_key not in overlaps_dict:
+                        # Determine relationship (contains, contained, or partial overlap)
+                        if network1.subnet_of(network2):
+                            relationship = f"{vnet1['cidr']} is contained within {vnet2['cidr']}"
+                        elif network2.subnet_of(network1):
+                            relationship = f"{vnet2['cidr']} is contained within {vnet1['cidr']}"
+                        else:
+                            relationship = f"{vnet1['cidr']} and {vnet2['cidr']} partially overlap"
+                        
+                        overlap_info = {
+                            'vnet1': vnet1,
+                            'vnet2': vnet2,
+                            'relationship': relationship
+                        }
+                        
+                        overlaps_dict[pair_key] = overlap_info
+                        overlaps_list.append(overlap_info)
+                        
+                        # Mark both VNets as having overlapping CIDRs
+                        if 'overlapping_cidrs' not in self.assessment_data[vnet1['subscription_id']]['vnets'][vnet1['vnet_id']]:
+                            self.assessment_data[vnet1['subscription_id']]['vnets'][vnet1['vnet_id']]['overlapping_cidrs'] = []
+                        if 'overlapping_cidrs' not in self.assessment_data[vnet2['subscription_id']]['vnets'][vnet2['vnet_id']]:
+                            self.assessment_data[vnet2['subscription_id']]['vnets'][vnet2['vnet_id']]['overlapping_cidrs'] = []
+                            
+                        self.assessment_data[vnet1['subscription_id']]['vnets'][vnet1['vnet_id']]['overlapping_cidrs'].append({
+                            'vnet_name': vnet2['vnet_name'],
+                            'vnet_id': vnet2['vnet_id'],
+                            'subscription_name': vnet2['subscription_name'],
+                            'subscription_id': vnet2['subscription_id'],
+                            'cidr': vnet2['cidr'],
+                            'relationship': relationship
+                        })
+                        
+                        self.assessment_data[vnet2['subscription_id']]['vnets'][vnet2['vnet_id']]['overlapping_cidrs'].append({
+                            'vnet_name': vnet1['vnet_name'],
+                            'vnet_id': vnet1['vnet_id'],
+                            'subscription_name': vnet1['subscription_name'],
+                            'subscription_id': vnet1['subscription_id'],
+                            'cidr': vnet1['cidr'],
+                            'relationship': relationship
+                        })
+        
+        # Store overlaps for template data
+        self.cidr_overlaps = overlaps_list
+        
+        if overlaps_list:
+            print(f"{Colors.YELLOW}! Found {len(overlaps_list)} CIDR overlap(s) across VNets{Colors.ENDC}")
+            for overlap in overlaps_list:
+                vnet1 = overlap['vnet1']
+                vnet2 = overlap['vnet2']
+                print(f"  {vnet1['vnet_name']} ({vnet1['subscription_name']}) - {vnet1['cidr']}")
+                print(f"  {vnet2['vnet_name']} ({vnet2['subscription_name']}) - {vnet2['cidr']}")
+                print(f"  Relationship: {overlap['relationship']}")
+                print()
+        else:
+            print(f"{Colors.GREEN}✓ No CIDR overlaps detected{Colors.ENDC}")
+
     def run_assessment(self):
         """Run the complete assessment workflow"""
         try:
@@ -336,6 +482,9 @@ class AzureEgressAssessment:
             for subscription in self.subscriptions:
                 self.scan_subscription(subscription)
                 
+            # Detect CIDR overlaps
+            self.detect_cidr_overlaps()
+            
             # Complete progress indicator
             print(f"\n{Colors.GREEN}✓ Assessment complete!{Colors.ENDC}")
             
@@ -364,68 +513,122 @@ class AzureEgressAssessment:
         total_vnets = 0
         total_subnets = 0
         total_affected_subnets = 0
-        total_quick_remediation = 0
+        total_default_egress = 0
         total_mixed_mode = 0
         total_not_affected = 0
-        total_vnets_insufficient_rt = 0
+        total_vnets_ready_secure = 0
+        total_vnets_ready_insecure = 0
+        total_vnets_not_ready = 0
+        total_vnets_with_overlaps = 0
+        total_subnets_no_workloads = 0
+        total_subnets_public = 0
+        total_subnets_nat_gateway = 0
+        total_subnets_udr = 0
         
         # Process each subscription
         for sub_id, sub_data in self.assessment_data.items():
             sub_vnets = len(sub_data['vnets'])
             sub_affected_subnets = 0
-            sub_quick_remediation = 0
+            sub_default_egress = 0
             sub_mixed_mode = 0
             sub_not_affected = 0
-            sub_vnets_insufficient_rt = 0
             sub_subnets = 0
+            sub_vnets_ready_secure = 0
+            sub_vnets_ready_insecure = 0
+            sub_vnets_not_ready = 0
+            sub_vnets_with_overlaps = 0
+            sub_subnets_no_workloads = 0
+            sub_subnets_public = 0
+            sub_subnets_nat_gateway = 0
+            sub_subnets_udr = 0
             
             # Calculate per-subscription metrics
             for vnet_id, vnet_data in sub_data['vnets'].items():
                 sub_subnets += len(vnet_data['subnets'])
-                sub_affected_subnets += vnet_data['affected_subnets_count']
                 
-                if vnet_data.get('insufficient_route_tables', False):
-                    sub_vnets_insufficient_rt += 1
-                
-                # Count by classification
+                # Count affected subnets manually
+                vnet_affected_count = 0
                 for subnet_id, subnet_data in vnet_data['subnets'].items():
-                    if subnet_data['classification'] == 'Not Affected':
+                    if subnet_data['classification'].startswith('Affected'):
+                        vnet_affected_count += 1
+                sub_affected_subnets += vnet_affected_count
+                
+                # VNet classification counts
+                vnet_classification = vnet_data.get('classification', 'Not Ready')
+                if vnet_classification == 'Ready: Secure':
+                    sub_vnets_ready_secure += 1
+                elif vnet_classification == 'Ready: Insecure':
+                    sub_vnets_ready_insecure += 1
+                else:
+                    sub_vnets_not_ready += 1
+                
+                if vnet_data.get('overlapping_cidrs', []):
+                    sub_vnets_with_overlaps += 1
+                
+                # Count by subnet classification and reason
+                for subnet_id, subnet_data in vnet_data['subnets'].items():
+                    classification = subnet_data['classification']
+                    reason = subnet_data.get('reason', '')
+                    
+                    if classification == 'Not Affected':
                         sub_not_affected += 1
-                    elif subnet_data['classification'] == 'Quick Remediation':
-                        sub_quick_remediation += 1
-                    elif subnet_data['classification'] == 'Mixed-Mode':
+                        if reason == 'No Workloads':
+                            sub_subnets_no_workloads += 1
+                        elif reason == 'Public Subnet':
+                            sub_subnets_public += 1
+                        elif reason == 'Azure NAT Gateway':
+                            sub_subnets_nat_gateway += 1
+                        elif 'UDR with 0.0.0.0/0' in reason:
+                            sub_subnets_udr += 1
+                    elif classification == 'Affected: Default Egress':
+                        sub_default_egress += 1
+                    elif classification == 'Affected: Mixed-Mode':
                         sub_mixed_mode += 1
             
             # Add to totals
             total_vnets += sub_vnets
             total_subnets += sub_subnets
             total_affected_subnets += sub_affected_subnets
-            total_quick_remediation += sub_quick_remediation
+            total_default_egress += sub_default_egress
             total_mixed_mode += sub_mixed_mode
             total_not_affected += sub_not_affected
-            total_vnets_insufficient_rt += sub_vnets_insufficient_rt
+            total_vnets_ready_secure += sub_vnets_ready_secure
+            total_vnets_ready_insecure += sub_vnets_ready_insecure
+            total_vnets_not_ready += sub_vnets_not_ready
+            total_vnets_with_overlaps += sub_vnets_with_overlaps
+            total_subnets_no_workloads += sub_subnets_no_workloads
+            total_subnets_public += sub_subnets_public
+            total_subnets_nat_gateway += sub_subnets_nat_gateway
+            total_subnets_udr += sub_subnets_udr
             
             # Print subscription summary
             print(f"\n{Colors.BOLD}Subscription: {sub_data['display_name']} ({sub_id}){Colors.ENDC}")
-            print(f"  VNets: {sub_vnets}")
+            print(f"  VNets: {sub_vnets} (Ready Secure: {sub_vnets_ready_secure}, Ready Insecure: {sub_vnets_ready_insecure}, Not Ready: {sub_vnets_not_ready})")
             print(f"  Subnets: {sub_subnets}")
             print(f"  Affected Subnets: {sub_affected_subnets}")
-            print(f"  VNets with Insufficient Route Tables: {sub_vnets_insufficient_rt}")
-            print(f"  Classification:")
-            print(f"    {Colors.GREEN}Not Affected: {sub_not_affected}{Colors.ENDC}")
-            print(f"    {Colors.YELLOW}Quick Remediation: {sub_quick_remediation}{Colors.ENDC}")
+            print(f"  VNets with Overlapping CIDRs: {sub_vnets_with_overlaps}")
+            print(f"  Subnet Classification:")
+            print(f"    {Colors.GREEN}Not Affected: {sub_not_affected} (No Workloads: {sub_subnets_no_workloads}, Public: {sub_subnets_public}, NAT Gateway: {sub_subnets_nat_gateway}, UDR: {sub_subnets_udr}){Colors.ENDC}")
+            print(f"    {Colors.YELLOW}Default Egress: {sub_default_egress}{Colors.ENDC}")
             print(f"    {Colors.RED}Mixed-Mode: {sub_mixed_mode}{Colors.ENDC}")
         
         # Print overall summary
         print(f"\n{Colors.HEADER}==================== OVERALL SUMMARY ===================={Colors.ENDC}")
         print(f"Total Subscriptions: {len(self.assessment_data)}")
         print(f"Total VNets: {total_vnets}")
+        print(f"  Ready (Secure): {total_vnets_ready_secure}")
+        print(f"  Ready (Insecure): {total_vnets_ready_insecure}")
+        print(f"  Not Ready: {total_vnets_not_ready}")
         print(f"Total Subnets: {total_subnets}")
         print(f"Total Affected Subnets: {total_affected_subnets}")
-        print(f"Total VNets with Insufficient Route Tables: {total_vnets_insufficient_rt}")
-        print(f"Classification:")
+        print(f"Total VNets with Overlapping CIDRs: {total_vnets_with_overlaps}")
+        print(f"Subnet Classification:")
         print(f"  {Colors.GREEN}Not Affected: {total_not_affected}{Colors.ENDC}")
-        print(f"  {Colors.YELLOW}Quick Remediation: {total_quick_remediation}{Colors.ENDC}")
+        print(f"    - No Workloads: {total_subnets_no_workloads}")
+        print(f"    - Public Subnets: {total_subnets_public}")
+        print(f"    - NAT Gateway: {total_subnets_nat_gateway}")
+        print(f"    - UDR with 0.0.0.0/0: {total_subnets_udr}")
+        print(f"  {Colors.YELLOW}Default Egress: {total_default_egress}{Colors.ENDC}")
         print(f"  {Colors.RED}Mixed-Mode: {total_mixed_mode}{Colors.ENDC}")
         
         # Print output locations
@@ -478,39 +681,160 @@ class AzureEgressAssessment:
         # Calculate summary statistics
         total_vnets = 0
         total_subnets = 0
-        total_affected_subnets = 0
-        total_quick_remediation = 0
-        total_mixed_mode = 0
-        total_not_affected = 0
-        total_vnets_insufficient_rt = 0
+        total_workloads = 0
+        total_workloads_public_ip = 0
+        
+        # VNet classification counters
+        vnets_ready_secure = 0
+        vnets_ready_insecure = 0
+        vnets_not_ready = 0
+        
+        # Subnet classification counters
+        subnets_not_affected_no_workloads = 0
+        subnets_not_affected_public_subnet = 0
+        subnets_not_affected_nat_gateway = 0
+        subnets_not_affected_udr = 0
+        subnets_affected_default_egress = 0
+        subnets_affected_mixed_mode = 0
+        
+        # Egress mechanism counters
+        nat_gateway_count = 0
+        udr_count = 0
+        default_egress_count = 0
+        public_subnet_count = 0
         
         for sub_id, sub_data in self.assessment_data.items():
             sub_vnets = len(sub_data['vnets'])
             total_vnets += sub_vnets
             
             for vnet_id, vnet_data in sub_data['vnets'].items():
+                # VNet classification
+                vnet_classification = vnet_data.get('classification', 'Not Ready')
+                if vnet_classification == 'Ready: Secure':
+                    vnets_ready_secure += 1
+                elif vnet_classification == 'Ready: Insecure':
+                    vnets_ready_insecure += 1
+                else:
+                    vnets_not_ready += 1
+                
                 vnet_subnets = len(vnet_data['subnets'])
                 total_subnets += vnet_subnets
-                total_affected_subnets += vnet_data['affected_subnets_count']
-                
-                if vnet_data.get('insufficient_route_tables', False):
-                    total_vnets_insufficient_rt += 1
                 
                 for subnet_id, subnet_data in vnet_data['subnets'].items():
-                    if subnet_data['classification'] == 'Not Affected':
-                        total_not_affected += 1
-                    elif subnet_data['classification'] == 'Quick Remediation':
-                        total_quick_remediation += 1
-                    elif subnet_data['classification'] == 'Mixed-Mode':
-                        total_mixed_mode += 1
+                    # Workload counting - use NICs as workloads
+                    total_workloads += subnet_data.get('nic_count', 0)
+                    total_workloads_public_ip += subnet_data.get('public_ip_count', 0)
+                    
+                    # Subnet classification
+                    classification = subnet_data['classification']
+                    reason = subnet_data.get('reason', '')
+                    
+                    if classification == 'Not Affected':
+                        if 'No Workloads' in reason:
+                            subnets_not_affected_no_workloads += 1
+                        elif 'Public Subnet' in reason:
+                            subnets_not_affected_public_subnet += 1
+                            public_subnet_count += 1
+                        elif 'Azure NAT Gateway' in reason:
+                            subnets_not_affected_nat_gateway += 1
+                            nat_gateway_count += 1
+                        elif 'UDR with 0.0.0.0/0' in reason:
+                            subnets_not_affected_udr += 1
+                            udr_count += 1
+                    elif classification == 'Affected: Default Egress':
+                        subnets_affected_default_egress += 1
+                        default_egress_count += 1
+                    elif classification == 'Affected: Mixed-Mode':
+                        subnets_affected_mixed_mode += 1
         
-        # Calculate impact percentage
+        # Calculate totals for affected subnets
+        total_affected_subnets = subnets_affected_default_egress + subnets_affected_mixed_mode
+        total_not_affected_subnets = (subnets_not_affected_no_workloads + 
+                                    subnets_not_affected_public_subnet + 
+                                    subnets_not_affected_nat_gateway + 
+                                    subnets_not_affected_udr)
+        
+        # Calculate percentages
         impact_percentage = 0
         if total_subnets > 0:
             impact_percentage = round((total_affected_subnets / total_subnets) * 100, 1)
         
+        workloads_public_ip_percentage = 0
+        if total_workloads > 0:
+            workloads_public_ip_percentage = round((total_workloads_public_ip / total_workloads) * 100, 1)
+        
+        # Calculate workloads at risk (those in affected subnets)
+        workloads_with_default_egress = 0
+        workloads_with_public_ips = total_workloads_public_ip
+        
+        for sub_id, sub_data in self.assessment_data.items():
+            for vnet_id, vnet_data in sub_data['vnets'].items():
+                for subnet_id, subnet_data in vnet_data['subnets'].items():
+                    classification = subnet_data['classification']
+                    if classification in ['Affected: Default Egress', 'Affected: Mixed-Mode']:
+                        workloads_with_default_egress += subnet_data.get('nic_count', 0)
+        
+        # Calculate VNETs needing remediation (Ready: Insecure + Not Ready)
+        vnets_needing_remediation = vnets_ready_insecure + vnets_not_ready
+        
+        # Calculate workload-weighted subnet classification
+        workloads_no_workloads = 0
+        workloads_public_subnet = 0
+        workloads_nat_gateway = 0
+        workloads_udr = 0
+        workloads_default_egress = 0
+        workloads_mixed_mode = 0
+        
+        for sub_id, sub_data in self.assessment_data.items():
+            for vnet_id, vnet_data in sub_data['vnets'].items():
+                for subnet_id, subnet_data in vnet_data['subnets'].items():
+                    workload_count = subnet_data.get('nic_count', 0)
+                    classification = subnet_data['classification']
+                    reason = subnet_data.get('reason', '')
+                    
+                    if classification == 'Not Affected':
+                        if 'No Workloads' in reason:
+                            workloads_no_workloads += workload_count
+                        elif 'Public Subnet' in reason:
+                            workloads_public_subnet += workload_count
+                        elif 'Azure NAT Gateway' in reason:
+                            workloads_nat_gateway += workload_count
+                        elif 'UDR with 0.0.0.0/0' in reason:
+                            workloads_udr += workload_count
+                    elif classification == 'Affected: Default Egress':
+                        workloads_default_egress += workload_count
+                    elif classification == 'Affected: Mixed-Mode':
+                        workloads_mixed_mode += workload_count
+        
+        # Calculate VNet percentages
+        vnets_ready_secure_percentage = 0
+        vnets_ready_insecure_percentage = 0
+        vnets_not_ready_percentage = 0
+        vnets_needing_remediation_percentage = 0
+        
+        if total_vnets > 0:
+            vnets_ready_secure_percentage = round((vnets_ready_secure / total_vnets) * 100, 1)
+            vnets_ready_insecure_percentage = round((vnets_ready_insecure / total_vnets) * 100, 1)
+            vnets_not_ready_percentage = round((vnets_not_ready / total_vnets) * 100, 1)
+            vnets_needing_remediation_percentage = round((vnets_needing_remediation / total_vnets) * 100, 1)
+        
+        # Calculate subnet percentages
+        subnets_affected_percentage = 0
+        subnets_affected_default_egress_percentage = 0
+        subnets_affected_mixed_mode_percentage = 0
+        
+        if total_subnets > 0:
+            subnets_affected_percentage = round((total_affected_subnets / total_subnets) * 100, 1)
+            subnets_affected_default_egress_percentage = round((subnets_affected_default_egress / total_subnets) * 100, 1)
+            subnets_affected_mixed_mode_percentage = round((subnets_affected_mixed_mode / total_subnets) * 100, 1)
+        
+        # Get CIDR overlap data
+        cidr_overlaps = getattr(self, 'cidr_overlaps', [])
+        cidr_overlap_count = len(cidr_overlaps)
+        
         # Generate table rows and content
-        subnet_impact_rows = self._generate_subnet_impact_rows()
+        vnet_details_rows = self._generate_vnet_details_rows()
+        subnet_details_rows = self._generate_subnet_details_rows()
         subscription_summary_rows = self._generate_subscription_summary_rows()
         subscription_details = self._generate_subscription_details()
         
@@ -519,56 +843,199 @@ class AzureEgressAssessment:
             'generated_date': self.start_time.strftime('%B %d, %Y at %I:%M %p'),
             'last_updated': self.start_time.strftime('%Y-%m-%d %H:%M:%S'),
             'subscriptions_count': len(self.assessment_data),
+            
+            # Executive Summary metrics
             'total_vnets': total_vnets,
             'total_subnets': total_subnets,
+            'total_workloads': total_workloads,
+            'total_workloads_public_ip': total_workloads_public_ip,
+            'workloads_public_ip_percentage': workloads_public_ip_percentage,
+            'workloads_with_default_egress': workloads_with_default_egress,
+            'workloads_with_public_ips': workloads_with_public_ips,
             'impact_percentage': impact_percentage,
             'total_affected_subnets': total_affected_subnets,
-            'total_not_affected': total_not_affected,
-            'total_quick_remediation': total_quick_remediation,
-            'total_mixed_mode': total_mixed_mode,
-            'subnet_impact_rows': subnet_impact_rows,
+            'total_not_affected_subnets': total_not_affected_subnets,
+            'cidr_overlap_count': cidr_overlap_count,
+            'vnets_needing_remediation': vnets_needing_remediation,
+            
+            # VNet classification
+            'vnets_ready_secure': vnets_ready_secure,
+            'vnets_ready_insecure': vnets_ready_insecure,
+            'vnets_not_ready': vnets_not_ready,
+            'vnets_ready_secure_percentage': vnets_ready_secure_percentage,
+            'vnets_ready_insecure_percentage': vnets_ready_insecure_percentage,
+            'vnets_not_ready_percentage': vnets_not_ready_percentage,
+            'vnets_needing_remediation_percentage': vnets_needing_remediation_percentage,
+            
+            # Subnet classification with reasons
+            'subnets_not_affected_no_workloads': subnets_not_affected_no_workloads,
+            'subnets_not_affected_public_subnet': subnets_not_affected_public_subnet,
+            'subnets_not_affected_nat_gateway': subnets_not_affected_nat_gateway,
+            'subnets_not_affected_udr': subnets_not_affected_udr,
+            'subnets_affected': total_affected_subnets,
+            'subnets_affected_percentage': subnets_affected_percentage,
+            'subnets_affected_default_egress': subnets_affected_default_egress,
+            'subnets_affected_default_egress_percentage': subnets_affected_default_egress_percentage,
+            'subnets_affected_mixed_mode': subnets_affected_mixed_mode,
+            'subnets_affected_mixed_mode_percentage': subnets_affected_mixed_mode_percentage,
+            
+            # Additional chart variables
+            'subnets_not_affected': total_not_affected_subnets,
+            'subnets_default_egress': subnets_affected_default_egress,
+            'subnets_mixed_mode': subnets_affected_mixed_mode,
+            'subnets_no_workloads': subnets_not_affected_no_workloads,
+            'subnets_public': subnets_not_affected_public_subnet,
+            'subnets_nat_gateway': subnets_not_affected_nat_gateway,
+            'subnets_udr': subnets_not_affected_udr,
+            'egress_none': subnets_not_affected_no_workloads,  # No workloads means no egress needed
+            'egress_nat_gateway': nat_gateway_count,
+            'egress_udr': udr_count,
+            'egress_default': default_egress_count,
+            
+            # Workload-weighted subnet classification data
+            'workloads_no_workloads': workloads_no_workloads,
+            'workloads_public_subnet': workloads_public_subnet,
+            'workloads_nat_gateway': workloads_nat_gateway,
+            'workloads_udr': workloads_udr,
+            'workloads_default_egress_chart': workloads_default_egress,
+            'workloads_mixed_mode': workloads_mixed_mode,
+            
+            # Egress mechanisms
+            'nat_gateway_count': nat_gateway_count,
+            'udr_count': udr_count,
+            'default_egress_count': default_egress_count,
+            'public_subnet_count': public_subnet_count,
+            
+            # Table content
+            'vnet_details_rows': vnet_details_rows,
+            'subnet_details_rows': subnet_details_rows,
             'subscription_summary_rows': subscription_summary_rows,
-            'subscription_details': subscription_details
-        }
+            'subscription_details': subscription_details,
+            
+            # CIDR overlaps
+            'cidr_overlaps': cidr_overlaps
+        };
         
         return template_data
     
-    def _generate_subnet_impact_rows(self):
-        """Generate HTML table rows for subnet impact analysis"""
+    def _generate_subnet_details_rows(self):
+        """Generate HTML table rows for Subnet details in Impact Assessment"""
         rows = []
         
         for sub_id, sub_data in self.assessment_data.items():
             for vnet_id, vnet_data in sub_data['vnets'].items():
                 for subnet_id, subnet_data in vnet_data['subnets'].items():
                     classification = subnet_data['classification']
+                    reason = subnet_data.get('reason', '')
                     
-                    # Determine risk level and remediation based on classification
+                    # Determine classification styling and remediation
                     if classification == 'Not Affected':
-                        risk_level = 'None'
-                        remediation = 'No action needed'
                         classification_class = 'status-not-affected'
-                        risk_class = 'risk-none'
-                    elif classification == 'Quick Remediation':
-                        risk_level = 'Medium'
-                        remediation = 'Add route table with default route or NAT Gateway'
-                        classification_class = 'status-quick-remediation'
-                        risk_class = 'risk-medium'
-                    else:  # Mixed-Mode
-                        risk_level = 'High'
-                        remediation = 'Review and plan mixed-mode migration'
-                        classification_class = 'status-mixed-mode'
-                        risk_class = 'risk-high'
+                        remediation = 'No action needed'
+                    elif classification == 'Affected: Default Egress':
+                        classification_class = 'status-affected-default'
+                        remediation = 'Implement NAT Gateway or UDR with controlled egress'
+                    elif classification == 'Affected: Mixed-Mode':
+                        classification_class = 'status-affected-mixed'
+                        remediation = 'Review mixed-mode configuration and standardize egress method'
+                    else:
+                        classification_class = 'status-unknown'
+                        remediation = 'Review configuration'
+                    
+                    # Get egress mechanism
+                    egress_mechanism = subnet_data.get('egress_mechanism', 'Unknown')
+                    
+                    # Get workload counts
+                    nic_count = subnet_data.get('nic_count', 0)
+                    public_ip_count = subnet_data.get('public_ip_count', 0)
                     
                     row = f"""
                     <tr>
                         <td>{sub_data['display_name']}</td>
-                        <td>{subnet_data['name']}</td>
                         <td>{vnet_data['name']}</td>
+                        <td>{subnet_data['name']}</td>
+                        <td>{subnet_data['address_prefix']}</td>
                         <td><span class="status-badge {classification_class}">{classification}</span></td>
-                        <td><span class="{risk_class}">{risk_level}</span></td>
+                        <td>{reason}</td>
+                        <td>{egress_mechanism}</td>
+                        <td>{nic_count}</td>
+                        <td>{public_ip_count}</td>
                         <td>{remediation}</td>
                     </tr>"""
                     rows.append(row)
+        
+        return '\n'.join(rows)
+    
+    def _generate_vnet_details_rows(self):
+        """Generate HTML table rows for VNet details in Impact Assessment"""
+        rows = []
+        
+        for sub_id, sub_data in self.assessment_data.items():
+            for vnet_id, vnet_data in sub_data['vnets'].items():
+                classification = vnet_data.get('classification', 'Not Ready')
+                
+                # Determine classification styling
+                if classification == 'Ready: Secure':
+                    classification_class = 'status-ready-secure'
+                elif classification == 'Ready: Insecure':
+                    classification_class = 'status-ready-insecure'
+                else:
+                    classification_class = 'status-not-ready'
+                
+                # Collect egress mechanisms used across all subnets in this VNet
+                egress_mechanisms = set()
+                for subnet_id, subnet_data in vnet_data['subnets'].items():
+                    # Check the stored egress mechanism first
+                    mechanism = subnet_data.get('egress_mechanism', '')
+                    reason = subnet_data.get('reason', '')
+                    classification = subnet_data.get('classification', '')
+                    
+                    # Map based on reason and classification
+                    if 'Azure NAT Gateway' in reason:
+                        egress_mechanisms.add('NAT Gateway')
+                    elif 'UDR with 0.0.0.0/0' in reason:
+                        egress_mechanisms.add('UDR')
+                    elif 'Public Subnet' in reason:
+                        egress_mechanisms.add('Public Subnet')
+                    elif 'Using default egress' in reason:
+                        egress_mechanisms.add('Default Egress')
+                    elif 'Mixed mode' in reason:
+                        egress_mechanisms.add('Mixed Mode')
+                    elif 'No Workloads' in reason:
+                        egress_mechanisms.add('No Workloads')
+                    elif mechanism and mechanism != 'Unknown':
+                        egress_mechanisms.add(mechanism)
+                    else:
+                        # Fallback based on classification
+                        if 'Not Affected' in classification:
+                            egress_mechanisms.add('Secured')
+                        elif 'Affected' in classification:
+                            egress_mechanisms.add('Default/Mixed')
+                
+                egress_mechanisms_str = ', '.join(sorted(egress_mechanisms)) if egress_mechanisms else 'None'
+                
+                # Count subnets by classification and workloads
+                affected_subnets = 0
+                not_affected_subnets = 0
+                total_workloads = 0
+                for subnet_id, subnet_data in vnet_data['subnets'].items():
+                    total_workloads += subnet_data.get('nic_count', 0)
+                    if subnet_data['classification'].startswith('Affected'):
+                        affected_subnets += 1
+                    else:
+                        not_affected_subnets += 1
+                
+                row = f"""
+                <tr>
+                    <td>{sub_data['display_name']}</td>
+                    <td>{vnet_data['name']}</td>
+                    <td><span class="status-badge {classification_class}">{classification}</span></td>
+                    <td>{', '.join(vnet_data['address_space'])}</td>
+                    <td>{len(vnet_data['subnets'])}</td>
+                    <td>{total_workloads}</td>
+                    <td>{egress_mechanisms_str}</td>
+                </tr>"""
+                rows.append(row)
         
         return '\n'.join(rows)
     
@@ -580,9 +1047,24 @@ class AzureEgressAssessment:
             vnets_total = len(sub_data['vnets'])
             vnets_affected = 0
             vnets_not_affected = 0
+            subnets_total = 0
+            subnets_affected = 0
+            workloads_total = 0
+            workloads_public_ip = 0
             
             for vnet_id, vnet_data in sub_data['vnets'].items():
-                if vnet_data['affected_subnets_count'] > 0:
+                vnet_has_affected_subnets = False
+                
+                for subnet_id, subnet_data in vnet_data['subnets'].items():
+                    subnets_total += 1
+                    workloads_total += subnet_data.get('nic_count', 0)
+                    workloads_public_ip += subnet_data.get('public_ip_count', 0)
+                    
+                    if subnet_data['classification'].startswith('Affected'):
+                        subnets_affected += 1
+                        vnet_has_affected_subnets = True
+                
+                if vnet_has_affected_subnets:
                     vnets_affected += 1
                 else:
                     vnets_not_affected += 1
@@ -595,6 +1077,10 @@ class AzureEgressAssessment:
                 <td>{vnets_total}</td>
                 <td>{vnets_affected}</td>
                 <td>{vnets_not_affected}</td>
+                <td>{subnets_total}</td>
+                <td>{subnets_affected}</td>
+                <td>{workloads_total}</td>
+                <td>{workloads_public_ip}</td>
                 <td>{impact_percentage:.1f}%</td>
             </tr>"""
             rows.append(row)
@@ -620,19 +1106,30 @@ class AzureEgressAssessment:
                 resource_group = vnet_data['resource_group']
                 address_space = ", ".join(vnet_data['address_space'])
                 subnets_count = len(vnet_data['subnets'])
-                affected_count = vnet_data['affected_subnets_count']
-                route_tables_count = vnet_data['route_tables_count']
-                insufficient_rt = vnet_data.get('insufficient_route_tables', False)
+                
+                # Count affected subnets
+                affected_count = 0
+                for subnet_id, subnet_data in vnet_data['subnets'].items():
+                    if subnet_data['classification'].startswith('Affected'):
+                        affected_count += 1
+                
+                # Get VNet classification and capabilities
+                vnet_classification = vnet_data.get('classification', 'Not Ready')
+                capabilities = []
+                if vnet_data.get('has_nat_gateway', False):
+                    capabilities.append('NAT Gateway')
+                if vnet_data.get('has_udr', False):
+                    capabilities.append('UDR')
+                capabilities_str = ', '.join(capabilities) if capabilities else 'None'
                 
                 detail_section += f"""
                 <div class="vnet-detail">
                     <h4>{vnet_name}</h4>
                     <p><strong>Resource Group:</strong> {resource_group}</p>
                     <p><strong>Address Space:</strong> {address_space}</p>
-                    <p><strong>Subnets:</strong> {subnets_count} total, {affected_count} affected</p>
-                    <p><strong>Route Tables:</strong> {route_tables_count} 
-                        {f'<span class="status-badge status-insufficient-rt">Insufficient for NVA Redundancy</span>' if insufficient_rt else ''}
-                    </p>"""
+                    <p><strong>Classification:</strong> <span class="status-badge">{vnet_classification}</span></p>
+                    <p><strong>Capabilities:</strong> {capabilities_str}</p>
+                    <p><strong>Subnets:</strong> {subnets_count} total, {affected_count} affected</p>"""
                 
                 if subnets_count > 0:
                     detail_section += """
@@ -643,17 +1140,33 @@ class AzureEgressAssessment:
                     for subnet_id, subnet_data in vnet_data['subnets'].items():
                         subnet_name = subnet_data['name']
                         classification = subnet_data['classification']
+                        reason = subnet_data.get('reason', '')
                         address_prefix = subnet_data['address_prefix']
                         
                         if classification == 'Not Affected':
                             classification_class = 'status-not-affected'
-                        elif classification == 'Quick Remediation':
-                            classification_class = 'status-quick-remediation'
+                        elif classification == 'Affected: Default Egress':
+                            classification_class = 'status-affected-default'
+                        elif classification == 'Affected: Mixed-Mode':
+                            classification_class = 'status-affected-mixed'
                         else:
-                            classification_class = 'status-mixed-mode'
+                            classification_class = 'status-unknown'
+                        
+                        # Add route next hop information for UDR subnets
+                        route_info = ""
+                        if 'UDR with 0.0.0.0/0' in reason:
+                            next_hop = subnet_data.get('default_route_next_hop', '')
+                            next_hop_ip = subnet_data.get('default_route_next_hop_ip', '')
+                            if next_hop:
+                                route_info = f" (Next Hop: {next_hop}"
+                                if next_hop_ip:
+                                    route_info += f" -> {next_hop_ip}"
+                                route_info += ")"
                         
                         detail_section += f"""
-                        <li>{subnet_name} ({address_prefix}): <span class="status-badge {classification_class}">{classification}</span></li>"""
+                        <li>{subnet_name} ({address_prefix}): <span class="status-badge {classification_class}">{classification}</span>
+                            {f' - {reason}{route_info}' if reason else ''}
+                        </li>"""
                     
                     detail_section += """
                     </ul>"""
@@ -674,14 +1187,13 @@ class AzureEgressAssessment:
         print(f"{Colors.YELLOW}! Using fallback HTML generation{Colors.ENDC}")
         
         try:
-            # Calculate summary statistics
+            # Calculate summary statistics with new classification system
             total_vnets = 0
             total_subnets = 0
             total_affected_subnets = 0
-            total_quick_remediation = 0
+            total_default_egress = 0
             total_mixed_mode = 0
             total_not_affected = 0
-            total_vnets_insufficient_rt = 0
             
             for sub_id, sub_data in self.assessment_data.items():
                 sub_vnets = len(sub_data['vnets'])
@@ -690,24 +1202,22 @@ class AzureEgressAssessment:
                 for vnet_id, vnet_data in sub_data['vnets'].items():
                     vnet_subnets = len(vnet_data['subnets'])
                     total_subnets += vnet_subnets
-                    total_affected_subnets += vnet_data['affected_subnets_count']
-                    
-                    if vnet_data.get('insufficient_route_tables', False):
-                        total_vnets_insufficient_rt += 1
                     
                     for subnet_id, subnet_data in vnet_data['subnets'].items():
-                        if subnet_data['classification'] == 'Not Affected':
+                        classification = subnet_data['classification']
+                        if classification == 'Not Affected':
                             total_not_affected += 1
-                        elif subnet_data['classification'] == 'Quick Remediation':
-                            total_quick_remediation += 1
-                        elif subnet_data['classification'] == 'Mixed-Mode':
+                        elif classification == 'Affected: Default Egress':
+                            total_default_egress += 1
+                            total_affected_subnets += 1
+                        elif classification == 'Affected: Mixed-Mode':
                             total_mixed_mode += 1
+                            total_affected_subnets += 1
             
             # Generate HTML content using the existing method
             html_content = self._generate_html_content(
                 total_vnets, total_subnets, total_affected_subnets,
-                total_quick_remediation, total_mixed_mode, total_not_affected,
-                total_vnets_insufficient_rt
+                total_default_egress, total_mixed_mode, total_not_affected
             )
             
             # Write HTML report
@@ -723,8 +1233,7 @@ class AzureEgressAssessment:
                 traceback.print_exc()
     
     def _generate_html_content(self, total_vnets, total_subnets, total_affected_subnets,
-                              total_quick_remediation, total_mixed_mode, total_not_affected,
-                              total_vnets_insufficient_rt):
+                              total_default_egress, total_mixed_mode, total_not_affected):
         """Generate the actual HTML content for the report"""
         
         # Generate current date/time
@@ -735,11 +1244,11 @@ class AzureEgressAssessment:
         if total_subnets > 0:
             affected_percent = (total_affected_subnets / total_subnets) * 100
         
-        quick_remediation_percent = 0
+        default_egress_percent = 0
         mixed_mode_percent = 0
         not_affected_percent = 0
         if total_subnets > 0:
-            quick_remediation_percent = (total_quick_remediation / total_subnets) * 100
+            default_egress_percent = (total_default_egress / total_subnets) * 100
             mixed_mode_percent = (total_mixed_mode / total_subnets) * 100
             not_affected_percent = (total_not_affected / total_subnets) * 100
         
@@ -984,14 +1493,18 @@ class AzureEgressAssessment:
                         risk_level = 'Low'
                         remediation = 'No action needed'
                         classification_class = 'not-affected'
-                    elif classification == 'Quick Remediation':
-                        risk_level = 'Medium'
-                        remediation = 'Add route table with default route'
-                        classification_class = 'quick-remediation'
-                    else:
+                    elif classification == 'Affected: Default Egress':
                         risk_level = 'High'
-                        remediation = 'Review and plan mixed-mode migration'
-                        classification_class = 'mixed-mode'
+                        remediation = 'Implement controlled egress (NAT Gateway or UDR)'
+                        classification_class = 'affected-default'
+                    elif classification == 'Affected: Mixed-Mode':
+                        risk_level = 'Critical'
+                        remediation = 'Review and standardize mixed-mode configuration'
+                        classification_class = 'affected-mixed'
+                    else:
+                        risk_level = 'Unknown'
+                        remediation = 'Review configuration'
+                        classification_class = 'unknown'
                     
                     html += f"""
                 <tr>
@@ -1022,7 +1535,13 @@ class AzureEgressAssessment:
             vnets_not_affected = 0
             
             for vnet_id, vnet_data in sub_data['vnets'].items():
-                if vnet_data['affected_subnets_count'] > 0:
+                # Count affected subnets manually
+                affected_count = 0
+                for subnet_id, subnet_data in vnet_data['subnets'].items():
+                    if subnet_data['classification'].startswith('Affected'):
+                        affected_count += 1
+                
+                if affected_count > 0:
                     vnets_affected += 1
                 else:
                     vnets_not_affected += 1
@@ -1055,9 +1574,9 @@ class AzureEgressAssessment:
         
         <div class="remediation">
             <h4>Remediation Guidance</h4>
-            <p><strong>For Quick Remediation Subnets:</strong> Add a route table with a default route (0.0.0.0/0) or deploy a NAT Gateway.</p>
+            <p><strong>For Default Egress Subnets:</strong> Add a route table with a default route (0.0.0.0/0) pointing to an NVA or deploy a NAT Gateway for controlled egress.</p>
             <p><strong>For Mixed-Mode Subnets:</strong> Consider restructuring the subnet to separate resources with public IPs from those without, or implement a consistent connectivity strategy.</p>
-            <p><strong>For VNets with Insufficient Route Tables:</strong> Add additional route tables to ensure proper NVA load balancing.</p>
+            <p><strong>General Recommendation:</strong> Standardize egress methods across your environment for better security and management.</p>
         </div>
 
     <!-- Subscription Details -->"""
@@ -1078,9 +1597,12 @@ class AzureEgressAssessment:
                 resource_group = vnet_data['resource_group']
                 address_space = ", ".join(vnet_data['address_space'])
                 subnets_count = len(vnet_data['subnets'])
-                affected_count = vnet_data['affected_subnets_count']
-                route_tables_count = vnet_data['route_tables_count']
-                insufficient_rt = vnet_data.get('insufficient_route_tables', False)
+                
+                # Count affected subnets manually
+                affected_count = 0
+                for subnet_id, subnet_data in vnet_data['subnets'].items():
+                    if subnet_data['classification'].startswith('Affected'):
+                        affected_count += 1
                 
                 html += f"""
             <div class="vnet">
@@ -1088,9 +1610,6 @@ class AzureEgressAssessment:
                 <p><strong>Resource Group:</strong> {resource_group}</p>
                 <p><strong>Address Space:</strong> {address_space}</p>
                 <p><strong>Subnets:</strong> {subnets_count} total, {affected_count} affected</p>
-                <p><strong>Route Tables:</strong> {route_tables_count} 
-                    {f'<span class="classification insufficient-rt">Insufficient for NVA Redundancy</span>' if insufficient_rt else ''}
-                </p>
 """
                 
                 if subnets_count > 0:
@@ -1120,10 +1639,12 @@ class AzureEgressAssessment:
                         classification_class = ""
                         if classification == "Not Affected":
                             classification_class = "not-affected"
-                        elif classification == "Quick Remediation":
-                            classification_class = "quick-remediation"
+                        elif classification == "Affected: Default Egress":
+                            classification_class = "affected-default"
+                        elif classification == "Affected: Mixed-Mode":
+                            classification_class = "affected-mixed"
                         else:
-                            classification_class = "mixed-mode"
+                            classification_class = "unknown"
                         
                         route_table_name = "None"
                         if route_table_id is not None and route_table_id != "None":
@@ -1270,9 +1791,9 @@ class AzureEgressAssessment:
             var classChart = new Chart(classCtx, {
                 type: 'doughnut',
                 data: {
-                    labels: ['Not Affected', 'Quick Remediation', 'Mixed-Mode'],
+                    labels: ['Not Affected', 'Default Egress', 'Mixed-Mode'],
                     datasets: [{
-                        data: [""" + f"{total_not_affected}, {total_quick_remediation}, {total_mixed_mode}" + """],
+                        data: [""" + f"{total_not_affected}, {total_default_egress}, {total_mixed_mode}" + """],
                         backgroundColor: ['#d4edda', '#fff3cd', '#f8d7da'],
                         borderWidth: 1,
                         borderColor: 'white'

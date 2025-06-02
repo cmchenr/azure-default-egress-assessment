@@ -179,6 +179,138 @@
             color: #6c757d;
         }
 
+        .stat-card-warning .number {
+            color: #f39c12;
+        }
+
+        .stat-card-danger .number {
+            color: #e74c3c;
+        }
+
+        .stat-card-success .number {
+            color: #27ae60;
+        }
+
+        .summary-cards {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+            gap: 24px;
+            margin-bottom: 32px;
+        }
+
+        .summary-card {
+            background: white;
+            padding: 24px;
+            border-radius: 12px;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.08);
+            border: 1px solid #e9ecef;
+        }
+
+        .summary-card h4 {
+            font-size: 16px;
+            font-weight: 600;
+            color: #2c3e50;
+            margin-bottom: 16px;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .breakdown {
+            display: flex;
+            flex-direction: column;
+            gap: 12px;
+        }
+
+        .breakdown-item {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 8px 0;
+            border-bottom: 1px solid #f1f3f4;
+        }
+
+        .breakdown-item:last-child {
+            border-bottom: none;
+        }
+
+        .label {
+            font-weight: 500;
+            padding: 4px 8px;
+            border-radius: 4px;
+            font-size: 14px;
+        }
+
+        .label.ready-secure {
+            background-color: #d4edda;
+            color: #155724;
+        }
+
+        .label.ready-insecure {
+            background-color: #fff3cd;
+            color: #856404;
+        }
+
+        .label.not-ready {
+            background-color: #f8d7da;
+            color: #721c24;
+        }
+
+        .label.affected {
+            background-color: #fff3cd;
+            color: #856404;
+        }
+
+        .label.default-egress {
+            background-color: #f8d7da;
+            color: #721c24;
+        }
+
+        .label.mixed-mode {
+            background-color: #fff3cd;
+            color: #856404;
+        }
+
+        .count {
+            font-weight: 600;
+            color: #2c3e50;
+        }
+
+        .remediation-section {
+            margin-bottom: 24px;
+        }
+
+        .remediation-section h4 {
+            font-size: 16px;
+            font-weight: 600;
+            color: #2c3e50;
+            margin-bottom: 12px;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .remediation-section ul {
+            margin-left: 20px;
+            margin-bottom: 16px;
+        }
+
+        .remediation-section ol {
+            margin-left: 20px;
+            margin-bottom: 16px;
+        }
+
+        .remediation-section li {
+            margin-bottom: 8px;
+            line-height: 1.5;
+        }
+
+        .section-description {
+            font-size: 14px;
+            color: #6c757d;
+            margin-top: 4px;
+        }
+
         .section {
             background: white;
             border-radius: 12px;
@@ -453,35 +585,75 @@
                             <div class="content-body">
                 <section id="executive-summary">
                     <div class="alert alert-warning">
-                        <strong><i class="fas fa-exclamation-triangle"></i> Important Notice:</strong>
-                        This report provides an assessment of the impact of Azure's upcoming change to default internet egress on your environment.
+                        <strong><i class="fas fa-exclamation-triangle"></i> Critical Action Required:</strong>
+                        Azure is eliminating their default Egress feature on September 30th, 2025. New subnets will require an explicit egress mechanism. All recommended remediation options will require incremental spend. <a href="https://azure.microsoft.com/en-us/updates?id=default-outbound-access-for-vms-in-azure-will-be-retired-transition-to-a-new-method-of-internet-access" target="_blank" style="color: #000080; text-decoration: underline; font-weight: bold;">Official Azure Documentation <i class="fas fa-external-link-alt"></i></a>
                     </div>
 
                     <div class="alert alert-info">
-                        <strong><i class="fas fa-info-circle"></i> Analysis Complete:</strong>
-                        Assessment completed for {{ subscriptions_count }} subscriptions with {{ total_vnets }} virtual networks.
+                        <strong><i class="fas fa-info-circle"></i> Assessment Summary:</strong>
+                        Found {{ vnets_with_workloads_and_default_egress }} VNets with workloads using default egress across {{ subscriptions_count }} subscriptions.
                     </div>
 
+                    <!-- Key Metrics Grid -->
                     <div class="stats-grid">
                         <div class="stat-card">
-                            <h3>Subscriptions</h3>
-                            <div class="number">{{ subscriptions_count }}</div>
-                            <div class="description">Total analyzed</div>
+                            <h3>Total Workloads</h3>
+                            <div class="number">{{ total_workloads }}</div>
+                            <div class="description">VNICs across all VNets</div>
                         </div>
-                        <div class="stat-card">
-                            <h3>Virtual Networks</h3>
-                            <div class="number">{{ total_vnets }}</div>
-                            <div class="description">Across all subscriptions</div>
+                        <div class="stat-card stat-card-warning">
+                            <h3>Workloads at Risk</h3>
+                            <div class="number">{{ workloads_with_default_egress }}</div>
+                            <div class="description">Using default egress</div>
                         </div>
-                        <div class="stat-card">
-                            <h3>Subnets</h3>
-                            <div class="number">{{ total_subnets }}</div>
-                            <div class="description">Total subnet count</div>
+                        <div class="stat-card stat-card-danger">
+                            <h3>Public IP Workloads</h3>
+                            <div class="number">{{ workloads_with_public_ips }}</div>
+                            <div class="description">Direct internet access</div>
                         </div>
-                        <div class="stat-card">
-                            <h3>Impact Rate</h3>
-                            <div class="number">{{ impact_percentage }}%</div>
-                            <div class="description">Subnets requiring attention</div>
+                        <div class="stat-card stat-card-warning">
+                            <h3>VNETs Needing Remediation</h3>
+                            <div class="number">{{ vnets_needing_remediation }}</div>
+                            <div class="description">Ready: Insecure + Not Ready</div>
+                        </div>
+                    </div>
+
+                    <!-- VNet Classification Summary -->
+                    <div class="summary-cards">
+                        <div class="summary-card">
+                            <h4><i class="fas fa-network-wired"></i> VNet Readiness Overview</h4>
+                            <div class="breakdown">
+                                <div class="breakdown-item">
+                                    <span class="label ready-secure">Ready: Secure</span>
+                                    <span class="count">{{ vnets_ready_secure }} ({{ vnets_ready_secure_percentage }}%)</span>
+                                </div>
+                                <div class="breakdown-item">
+                                    <span class="label ready-insecure">Ready: Insecure</span>
+                                    <span class="count">{{ vnets_ready_insecure }} ({{ vnets_ready_insecure_percentage }}%)</span>
+                                </div>
+                                <div class="breakdown-item">
+                                    <span class="label not-ready">Not Ready</span>
+                                    <span class="count">{{ vnets_not_ready }} ({{ vnets_not_ready_percentage }}%)</span>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div class="summary-card">
+                            <h4><i class="fas fa-exclamation-triangle"></i> Subnet Readiness Overview</h4>
+                            <div class="breakdown">
+                                <div class="breakdown-item">
+                                    <span class="label affected">Affected Subnets</span>
+                                    <span class="count">{{ subnets_affected }} ({{ subnets_affected_percentage }}%)</span>
+                                </div>
+                                <div class="breakdown-item">
+                                    <span class="label default-egress">Default Egress</span>
+                                    <span class="count">{{ subnets_default_egress }}</span>
+                                </div>
+                                <div class="breakdown-item">
+                                    <span class="label mixed-mode">Mixed-Mode</span>
+                                    <span class="count">{{ subnets_mixed_mode }}</span>
+                                </div>
+                            </div>
                         </div>
                     </div>
                 </section>
@@ -489,15 +661,37 @@
                 <section id="network-analysis">
                     <div class="chart-grid">
                         <div class="chart-container">
-                            <h3>Impact Assessment</h3>
+                            <h3>VNet Classification Distribution</h3>
                             <div class="chart-wrapper">
-                                <canvas id="impactChart"></canvas>
+                                <canvas id="vnetClassificationChart"></canvas>
                             </div>
                         </div>
                         <div class="chart-container">
-                            <h3>Classification Distribution</h3>
+                            <h3>Subnet Classification Distribution</h3>
                             <div class="chart-wrapper">
-                                <canvas id="classificationChart"></canvas>
+                                <canvas id="subnetImpactChart"></canvas>
+                            </div>
+                        </div>
+                    </div>
+                    
+                    {% if cidr_overlaps %}
+                    <div class="alert alert-danger">
+                        <strong><i class="fas fa-exclamation-triangle"></i> CIDR Overlap Warning:</strong>
+                        {{ cidr_overlaps|length }} VNet(s) have overlapping CIDR ranges that prevent connection to the same VNET Hub or Virtual WAN hub.
+                    </div>
+                    {% endif %}
+                    
+                    <div class="chart-grid">
+                        <div class="chart-container">
+                            <h3>Subnet Classification by Reason (by Count)</h3>
+                            <div class="chart-wrapper">
+                                <canvas id="subnetReasonChart"></canvas>
+                            </div>
+                        </div>
+                        <div class="chart-container">
+                            <h3>Subnet Classification by Reason (by Workloads)</h3>
+                            <div class="chart-wrapper">
+                                <canvas id="subnetReasonWorkloadChart"></canvas>
                             </div>
                         </div>
                     </div>
@@ -506,7 +700,10 @@
                 <section id="impact-assessment">
                     <div class="section">
                         <div class="section-header">
-                            <h2>Subnet Impact Analysis</h2>
+                            <h2>VNet Details</h2>
+                            <div class="section-description">
+                                Virtual networks analyzed for egress readiness and classification
+                            </div>
                         </div>
                         <div class="section-content">
                             <div class="table-container">
@@ -514,15 +711,48 @@
                                     <thead>
                                         <tr>
                                             <th>Subscription</th>
-                                            <th>Subnet Name</th>
-                                            <th>VNET Name</th>
+                                            <th>VNet Name</th>
                                             <th>Classification</th>
-                                            <th>Risk Level</th>
-                                            <th>Recommended Action</th>
+                                            <th>Address Space</th>
+                                            <th>Subnets</th>
+                                            <th>Workloads</th>
+                                            <th>Egress Mechanisms</th>
                                         </tr>
                                     </thead>
                                     <tbody>
-                                        {{ subnet_impact_rows }}
+                                        {{ vnet_details_rows }}
+                                    </tbody>
+                                </table>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="section">
+                        <div class="section-header">
+                            <h2>Subnet Details</h2>
+                            <div class="section-description">
+                                Individual subnet analysis with classification reasons and workload counts
+                            </div>
+                        </div>
+                        <div class="section-content">
+                            <div class="table-container">
+                                <table class="data-table">
+                                    <thead>
+                                        <tr>
+                                            <th>Subscription</th>
+                                            <th>VNet</th>
+                                            <th>Subnet Name</th>
+                                            <th>Address Prefix</th>
+                                            <th>Classification</th>
+                                            <th>Reason</th>
+                                            <th>Egress Mechanism</th>
+                                            <th>Workloads</th>
+                                            <th>Public IPs</th>
+                                            <th>Remediation</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody>
+                                        {{ subnet_details_rows }}
                                     </tbody>
                                 </table>
                             </div>
@@ -532,6 +762,9 @@
                     <div class="section">
                         <div class="section-header">
                             <h2>Subscription Summary</h2>
+                            <div class="section-description">
+                                Overview of impact and workload distribution by subscription
+                            </div>
                         </div>
                         <div class="section-content">
                             <div class="table-container">
@@ -539,10 +772,14 @@
                                     <thead>
                                         <tr>
                                             <th>Subscription</th>
-                                            <th>Total VNETs</th>
-                                            <th>Needs Remediation</th>
-                                            <th>Not Affected</th>
-                                            <th>Impact %</th>
+                                            <th>VNets</th>
+                                            <th>Subnets</th>
+                                            <th>Workloads</th>
+                                            <th>Public IPs</th>
+                                            <th>Affected Subnets</th>
+                                            <th>Ready Secure</th>
+                                            <th>Ready Insecure</th>
+                                            <th>Not Ready</th>
                                         </tr>
                                     </thead>
                                     <tbody>
@@ -552,26 +789,138 @@
                             </div>
                         </div>
                     </div>
+
+                    {% if cidr_overlaps %}
+                    <div class="section">
+                        <div class="section-header">
+                            <h2>CIDR Overlaps</h2>
+                            <div class="section-description">
+                                VNets with overlapping address spaces that cannot be connected to the same VNET Hub or Virtual WAN hub
+                            </div>
+                        </div>
+                        <div class="section-content">
+                            <div class="alert alert-warning mb-3">
+                                <i class="fas fa-exclamation-triangle"></i>
+                                <strong>{{ cidr_overlaps|length }} overlap(s) detected</strong> - These VNets cannot be connected to the same VNET Hub or Virtual WAN hub
+                            </div>
+                            <div class="alert alert-info mb-3">
+                                <i class="fas fa-lightbulb"></i>
+                                <strong>Aviatrix Solution:</strong> Aviatrix Cloud Native Security Fabric can overcome this limitation for both Egress and East-West Traffic, enabling connectivity between VNets with overlapping address spaces.
+                            </div>
+                            <div class="table-container">
+                                <table class="data-table">
+                                    <thead>
+                                        <tr>
+                                            <th>VNet 1</th>
+                                            <th>Subscription 1</th>
+                                            <th>CIDR 1</th>
+                                            <th>VNet 2</th>
+                                            <th>Subscription 2</th>
+                                            <th>CIDR 2</th>
+                                            <th>Overlap Type</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody>
+                                        {% for overlap in cidr_overlaps %}
+                                        <tr>
+                                            <td>{{ overlap.vnet1.vnet_name }}</td>
+                                            <td>{{ overlap.vnet1.subscription_name }}</td>
+                                            <td><code>{{ overlap.vnet1.cidr }}</code></td>
+                                            <td>{{ overlap.vnet2.vnet_name }}</td>
+                                            <td>{{ overlap.vnet2.subscription_name }}</td>
+                                            <td><code>{{ overlap.vnet2.cidr }}</code></td>
+                                            <td>{{ overlap.relationship }}</td>
+                                        </tr>
+                                        {% endfor %}
+                                    </tbody>
+                                </table>
+                            </div>
+                        </div>
+                    </div>
+                    {% endif %}
                 </section>
 
                 <section id="remediation">
-                    <div class="remediation-guidance">
-                        <h3><i class="fas fa-lightbulb"></i> Remediation Guidance</h3>
-                        <div class="remediation-item">
-                            <strong>Quick Remediation Subnets:</strong> Add a route table with a default route (0.0.0.0/0) pointing to your preferred next hop, or deploy a NAT Gateway for managed outbound connectivity.
+                    <div class="section">
+                        <div class="section-header">
+                            <h2>Remediation Guidance</h2>
+                            <div class="section-description">
+                                Recommended actions to address identified issues
+                            </div>
                         </div>
-                        <div class="remediation-item">
-                            <strong>Mixed-Mode Subnets:</strong> Consider restructuring the subnet to separate resources with public IPs from those without, or implement a consistent connectivity strategy across all resources.
-                        </div>
-                        <div class="remediation-item">
-                            <strong>VNets with Insufficient Route Tables:</strong> Add additional route tables to ensure proper network virtual appliance (NVA) load balancing and redundancy.
+                        <div class="section-content">
+                            <div class="remediation-guidance">
+                                <h3><i class="fas fa-lightbulb"></i> Remediation Strategies</h3>
+                                
+                                <div class="alert alert-info">
+                                    <strong><i class="fas fa-calendar-alt"></i> Timeline:</strong>
+                                    Azure is eliminating their default Egress feature on September 30th, 2025. Plan remediation accordingly. <a href="https://azure.microsoft.com/en-us/updates?id=default-outbound-access-for-vms-in-azure-will-be-retired-transition-to-a-new-method-of-internet-access" target="_blank" style="color: #0066cc; text-decoration: underline;">See official documentation <i class="fas fa-external-link-alt"></i></a>
+                                </div>
+
+                                <div class="remediation-section">
+                                    <h4><i class="fas fa-shield-alt"></i> Secure Remediation (Recommended)</h4>
+                                    <div class="remediation-item">
+                                        <strong>User Defined Routes (UDRs):</strong>
+                                        <ul>
+                                            <li>Create route tables with default route (0.0.0.0/0) pointing to Network Virtual Appliance (NVA)</li>
+                                            <li>Associate route tables with affected subnets</li>
+                                            <li>Provides security inspection and centralized control</li>
+                                            <li>Recommended for production environments</li>
+                                        </ul>
+                                    </div>
+                                </div>
+
+                                <div class="remediation-section">
+                                    <h4><i class="fas fa-network-wired"></i> Managed Egress (Alternative)</h4>
+                                    <div class="remediation-item">
+                                        <strong>Azure NAT Gateway:</strong>
+                                        <ul>
+                                            <li>Deploy NAT Gateway for managed outbound connectivity</li>
+                                            <li>Associate with subnets requiring internet access</li>
+                                            <li>Provides predictable SNAT but no security inspection</li>
+                                            <li>Suitable for development and testing environments</li>
+                                        </ul>
+                                    </div>
+                                </div>
+
+                                <div class="remediation-section">
+                                    <h4><i class="fas fa-exclamation-triangle"></i> Special Cases</h4>
+                                    <div class="remediation-item">
+                                        <strong>Mixed-Mode Subnets:</strong>
+                                        <ul>
+                                            <li>Separate resources with public IPs from those without</li>
+                                            <li>Create dedicated subnets for public-facing resources</li>
+                                            <li>Implement consistent connectivity strategy</li>
+                                        </ul>
+                                    </div>
+                                    <div class="remediation-item">
+                                        <strong>CIDR Overlaps:</strong>
+                                        <ul>
+                                            <li>Address overlapping CIDR ranges before VNET Hub or Virtual WAN hub connectivity</li>
+                                            <li>Consider VNet peering as alternative</li>
+                                            <li>Plan IP address space redesign if necessary</li>
+                                        </ul>
+                                    </div>
+                                </div>
+
+                                <div class="remediation-section">
+                                    <h4><i class="fas fa-list-ol"></i> Remediation Priority</h4>
+                                    <div class="remediation-item">
+                                        <strong>Priority Order:</strong>
+                                        <ol>
+                                            <li><strong>High:</strong> Subnets with "Default Egress" classification</li>
+                                            <li><strong>Medium:</strong> "Mixed-Mode" subnets requiring standardization</li>
+                                            <li><strong>Low:</strong> VNets with CIDR overlaps (impacts future connectivity)</li>
+                                        </ol>
+                                    </div>
+                                </div>
+                            </div>
                         </div>
                     </div>
                 </section>
 
                 <section id="subscription-details">
-                    <!-- Subscription Details -->
-                    <div class="section">
+                    <div class="section" id="subscription-details">
                         <div class="section-header">
                             <h2>Detailed Subscription Analysis</h2>
                         </div>
@@ -688,15 +1037,15 @@
                 }
             };
 
-            // Impact Chart
-            const impactCtx = document.getElementById('impactChart').getContext('2d');
-            new Chart(impactCtx, {
+            // VNet Classification Chart
+            const vnetCtx = document.getElementById('vnetClassificationChart').getContext('2d');
+            new Chart(vnetCtx, {
                 type: 'doughnut',
                 data: {
-                    labels: ['Affected', 'Not Affected'],
+                    labels: ['Ready: Secure', 'Ready: Insecure', 'Not Ready'],
                     datasets: [{
-                        data: [{{ total_affected_subnets }}, {{ total_subnets - total_affected_subnets }}],
-                        backgroundColor: [colors.warning, colors.success],
+                        data: [{{ vnets_ready_secure }}, {{ vnets_ready_insecure }}, {{ vnets_not_ready }}],
+                        backgroundColor: [colors.success, colors.warning, colors.danger],
                         borderWidth: 0,
                         hoverBorderWidth: 2,
                         hoverBorderColor: 'white'
@@ -705,21 +1054,95 @@
                 options: chartOptions
             });
             
-            // Classification Chart
-            const classCtx = document.getElementById('classificationChart').getContext('2d');
-            new Chart(classCtx, {
+            // Subnet Impact Chart
+            const subnetCtx = document.getElementById('subnetImpactChart').getContext('2d');
+            new Chart(subnetCtx, {
                 type: 'doughnut',
                 data: {
-                    labels: ['Not Affected', 'Quick Remediation', 'Mixed-Mode'],
+                    labels: ['Not Affected', 'Default Egress', 'Mixed-Mode'],
                     datasets: [{
-                        data: [{{ total_not_affected }}, {{ total_quick_remediation }}, {{ total_mixed_mode }}],
-                        backgroundColor: [colors.success, colors.warning, colors.danger],
+                        data: [{{ subnets_not_affected }}, {{ subnets_default_egress }}, {{ subnets_mixed_mode }}],
+                        backgroundColor: [colors.success, colors.danger, colors.warning],
                         borderWidth: 0,
                         hoverBorderWidth: 2,
                         hoverBorderColor: 'white'
                     }]
                 },
                 options: chartOptions
+            });
+
+            // Subnet Reason Chart
+            const reasonCtx = document.getElementById('subnetReasonChart').getContext('2d');
+            new Chart(reasonCtx, {
+                type: 'bar',
+                data: {
+                    labels: ['No Workloads', 'Public Subnet', 'NAT Gateway', 'UDR Route', 'Default Egress', 'Mixed-Mode'],
+                    datasets: [{
+                        data: [{{ subnets_no_workloads }}, {{ subnets_public }}, {{ subnets_nat_gateway }}, {{ subnets_udr }}, {{ subnets_default_egress }}, {{ subnets_mixed_mode }}],
+                        backgroundColor: [colors.info, colors.info, colors.warning, colors.success, colors.danger, colors.warning],
+                        borderWidth: 0
+                    }]
+                },
+                options: {
+                    ...chartOptions,
+                    plugins: {
+                        legend: {
+                            display: false
+                        },
+                        tooltip: {
+                            callbacks: {
+                                label: function(context) {
+                                    return `${context.label}: ${context.parsed.y} subnets`;
+                                }
+                            }
+                        }
+                    },
+                    scales: {
+                        y: {
+                            beginAtZero: true,
+                            ticks: {
+                                stepSize: 1
+                            }
+                        }
+                    }
+                }
+            });
+
+            // Subnet Reason Chart (Workload-weighted)
+            const reasonWorkloadCtx = document.getElementById('subnetReasonWorkloadChart').getContext('2d');
+            new Chart(reasonWorkloadCtx, {
+                type: 'bar',
+                data: {
+                    labels: ['No Workloads', 'Public Subnet', 'NAT Gateway', 'UDR Route', 'Default Egress', 'Mixed-Mode'],
+                    datasets: [{
+                        data: [{{ workloads_no_workloads }}, {{ workloads_public_subnet }}, {{ workloads_nat_gateway }}, {{ workloads_udr }}, {{ workloads_default_egress_chart }}, {{ workloads_mixed_mode }}],
+                        backgroundColor: [colors.info, colors.info, colors.warning, colors.success, colors.danger, colors.warning],
+                        borderWidth: 0
+                    }]
+                },
+                options: {
+                    ...chartOptions,
+                    plugins: {
+                        legend: {
+                            display: false
+                        },
+                        tooltip: {
+                            callbacks: {
+                                label: function(context) {
+                                    return `${context.label}: ${context.parsed.y} workloads`;
+                                }
+                            }
+                        }
+                    },
+                    scales: {
+                        y: {
+                            beginAtZero: true,
+                            ticks: {
+                                stepSize: 1
+                            }
+                        }
+                    }
+                }
             });
         };
     </script>
