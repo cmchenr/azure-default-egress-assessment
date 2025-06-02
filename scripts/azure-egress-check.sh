@@ -26,6 +26,7 @@ TEMPLATE_URL="https://raw.githubusercontent.com/$GITHUB_REPO/$GITHUB_BRANCH/scri
 TEMP_DIR="$(mktemp -d -t azure_egress_assessment.XXXXXX)"
 SCRIPT_PATH="$TEMP_DIR/azure_egress_assessment.py"
 TEMPLATE_PATH="$TEMP_DIR/report_template.html"
+VENV_PATH="$TEMP_DIR/venv"
 REQUIREMENTS=(
     "azure-identity"
     "azure-mgmt-resource"
@@ -48,13 +49,43 @@ command_exists() {
 
 # Function to get Python executable
 get_python_executable() {
+    # Try python3 first (preferred)
     if command_exists python3; then
         echo "python3"
-    elif command_exists python && [[ $(python --version 2>&1) == *"Python 3"* ]]; then
-        echo "python"
-    else
-        echo ""
+        return
     fi
+    
+    # Try python if it's Python 3
+    if command_exists python && [[ $(python --version 2>&1) == *"Python 3"* ]]; then
+        echo "python"
+        return
+    fi
+    
+    # On macOS, check for common Homebrew paths
+    if [[ "$OSTYPE" == "darwin"* ]]; then
+        # Check Homebrew Intel path
+        if [ -f "/usr/local/bin/python3" ]; then
+            echo "/usr/local/bin/python3"
+            return
+        fi
+        
+        # Check Homebrew Apple Silicon path
+        if [ -f "/opt/homebrew/bin/python3" ]; then
+            echo "/opt/homebrew/bin/python3"
+            return
+        fi
+        
+        # Check for pyenv or other version managers
+        if command_exists pyenv && pyenv global >/dev/null 2>&1; then
+            local pyenv_python="$(pyenv which python3 2>/dev/null)"
+            if [ -n "$pyenv_python" ] && [ -f "$pyenv_python" ]; then
+                echo "$pyenv_python"
+                return
+            fi
+        fi
+    fi
+    
+    echo ""
 }
 
 # Function to check Python version
@@ -71,41 +102,96 @@ check_python_version() {
     fi
 }
 
-# Function to install packages using pip
-install_packages() {
+# Function to create virtual environment and install packages
+setup_virtual_environment() {
     local python_exe=$1
-    local pip_exe="${python_exe} -m pip"
 
-    echo -e "\n${BLUE}Checking and installing required Python packages...${NC}"
+    echo -e "\n${BLUE}Creating virtual environment for package isolation...${NC}"
+    echo -e "${BLUE}This avoids conflicts with system Python packages.${NC}"
 
-    # Check if pip exists
-    if ! $python_exe -m pip --version &> /dev/null; then
-        echo -e "${YELLOW}pip not found. Attempting to install pip...${NC}"
-        if command_exists curl; then
-            curl https://bootstrap.pypa.io/get-pip.py -o get-pip.py
-            $python_exe get-pip.py --user
-            rm get-pip.py
-        elif command_exists wget; then
-            wget https://bootstrap.pypa.io/get-pip.py
-            $python_exe get-pip.py --user
-            rm get-pip.py
+    # Create virtual environment
+    echo -e "${BLUE}Creating virtual environment at: $VENV_PATH${NC}"
+    if ! $python_exe -m venv "$VENV_PATH" 2>/dev/null; then
+        echo -e "${YELLOW}Failed to create virtual environment. This might be due to missing venv module.${NC}"
+        
+        # Detect operating system and provide appropriate guidance
+        if [[ "$OSTYPE" == "darwin"* ]]; then
+            # macOS
+            echo -e "${BLUE}Detected macOS. Checking Python installation...${NC}"
+            echo -e "${YELLOW}On macOS, venv should be included with Python 3.3+${NC}"
+            
+            if command_exists brew; then
+                echo -e "${BLUE}Homebrew detected. You might want to try:${NC}"
+                echo -e "${YELLOW}  brew install python3${NC}"
+                echo -e "${YELLOW}Or ensure you're using Homebrew Python:${NC}"
+                echo -e "${YELLOW}  which python3${NC}"
+            else
+                echo -e "${YELLOW}Consider installing Homebrew and Python via Homebrew:${NC}"
+                echo -e "${YELLOW}  /bin/bash -c \"\$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)\"${NC}"
+                echo -e "${YELLOW}  brew install python3${NC}"
+            fi
+            
+            echo -e "${RED}Error: Cannot create virtual environment on macOS.${NC}"
+            echo -e "${YELLOW}Please ensure you have a working Python 3.6+ installation.${NC}"
+            exit 1
+            
+        elif command_exists apt-get; then
+            echo -e "${BLUE}Installing python3-venv (Ubuntu/Debian)...${NC}"
+            sudo apt-get update && sudo apt-get install -y python3-venv
+        elif command_exists yum; then
+            echo -e "${BLUE}Installing python3-venv (RHEL/CentOS)...${NC}"
+            sudo yum install -y python3-venv
+        elif command_exists dnf; then
+            echo -e "${BLUE}Installing python3-venv (Fedora)...${NC}"
+            sudo dnf install -y python3-venv
         else
-            echo -e "${RED}Error: Neither curl nor wget found. Please install pip manually.${NC}"
+            echo -e "${RED}Error: Could not install venv module automatically.${NC}"
+            echo -e "${YELLOW}Please install manually based on your OS:${NC}"
+            echo -e "${YELLOW}  Ubuntu/Debian: sudo apt-get install python3-venv${NC}"
+            echo -e "${YELLOW}  RHEL/CentOS:   sudo yum install python3-venv${NC}"
+            echo -e "${YELLOW}  Fedora:        sudo dnf install python3-venv${NC}"
+            echo -e "${YELLOW}  macOS:         brew install python3${NC}"
             exit 1
         fi
+        
+        # Try creating venv again (only for Linux systems)
+        if [[ "$OSTYPE" != "darwin"* ]]; then
+            if ! $python_exe -m venv "$VENV_PATH"; then
+                echo -e "${RED}Error: Still unable to create virtual environment.${NC}"
+                echo -e "${YELLOW}Please check your Python installation.${NC}"
+                exit 1
+            fi
+        fi
     fi
+    
+    echo -e "${GREEN}✓ Virtual environment created successfully${NC}"
 
-    # Update pip
-    echo -e "${BLUE}Updating pip...${NC}"
-    $python_exe -m pip install --upgrade pip --quiet
+    # Activate virtual environment
+    source "$VENV_PATH/bin/activate"
+    
+    # Get the virtual environment Python executable
+    local venv_python="$VENV_PATH/bin/python"
+    
+    echo -e "${BLUE}Using virtual environment Python: $($venv_python --version)${NC}"
 
-    # Install each required package
+    # Update pip in virtual environment
+    echo -e "${BLUE}Updating pip in virtual environment...${NC}"
+    $venv_python -m pip install --upgrade pip --quiet
+
+    # Install each required package in virtual environment
+    echo -e "${BLUE}Installing required packages in virtual environment...${NC}"
     for package in "${REQUIREMENTS[@]}"; do
         echo -e "${BLUE}Installing $package...${NC}"
-        $python_exe -m pip install --upgrade $package --quiet
+        if ! $venv_python -m pip install --upgrade $package --quiet; then
+            echo -e "${RED}Error: Failed to install $package in virtual environment.${NC}"
+            exit 1
+        fi
     done
 
-    echo -e "${GREEN}All required packages installed successfully.${NC}"
+    echo -e "${GREEN}✓ All required packages installed successfully in virtual environment${NC}"
+    
+    # Return the virtual environment python path
+    echo "$venv_python"
 }
 
 # Function to download the assessment script and template
@@ -190,20 +276,38 @@ main() {
     
     if [ -z "$PYTHON_EXE" ]; then
         echo -e "${RED}Error: Python 3.6+ is required but not found.${NC}"
-        echo -e "${YELLOW}Attempting to install Python 3...${NC}"
         
-        # Try to install Python based on the platform
-        if command_exists apt-get; then
+        # Provide OS-specific installation guidance
+        if [[ "$OSTYPE" == "darwin"* ]]; then
+            echo -e "${YELLOW}On macOS, you can install Python 3 using:${NC}"
+            if command_exists brew; then
+                echo -e "${BLUE}Installing Python via Homebrew...${NC}"
+                brew install python
+            else
+                echo -e "${YELLOW}Option 1 - Install Homebrew first, then Python:${NC}"
+                echo -e "${YELLOW}  /bin/bash -c \"\$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)\"${NC}"
+                echo -e "${YELLOW}  brew install python${NC}"
+                echo -e "${YELLOW}Option 2 - Download from python.org:${NC}"
+                echo -e "${YELLOW}  https://www.python.org/downloads/macos/${NC}"
+                exit 1
+            fi
+        elif command_exists apt-get; then
+            echo -e "${BLUE}Installing Python via apt-get...${NC}"
             sudo apt-get update
-            sudo apt-get install -y python3 python3-pip
+            sudo apt-get install -y python3 python3-pip python3-venv
         elif command_exists yum; then
-            sudo yum install -y python3 python3-pip
-        elif command_exists brew; then
-            brew install python
+            echo -e "${BLUE}Installing Python via yum...${NC}"
+            sudo yum install -y python3 python3-pip python3-venv
+        elif command_exists dnf; then
+            echo -e "${BLUE}Installing Python via dnf...${NC}"
+            sudo dnf install -y python3 python3-pip python3-venv
         else
             echo -e "${RED}Error: Could not install Python automatically.${NC}"
-            echo -e "${YELLOW}Please install Python 3.6+ manually:${NC}"
-            echo -e "${YELLOW}    https://www.python.org/downloads/${NC}"
+            echo -e "${YELLOW}Please install Python 3.6+ manually based on your OS:${NC}"
+            echo -e "${YELLOW}  macOS:         brew install python (after installing Homebrew)${NC}"
+            echo -e "${YELLOW}  Ubuntu/Debian: sudo apt-get install python3 python3-venv${NC}"
+            echo -e "${YELLOW}  RHEL/CentOS:   sudo yum install python3 python3-venv${NC}"
+            echo -e "${YELLOW}  Or download from: https://www.python.org/downloads/${NC}"
             exit 1
         fi
         
@@ -228,14 +332,14 @@ main() {
     # Always download the latest script from GitHub
     download_script
     
-    # Install required packages
-    install_packages "$PYTHON_EXE"
+    # Setup virtual environment and install required packages
+    VENV_PYTHON=$(setup_virtual_environment "$PYTHON_EXE")
     
     # Check Azure login status
     check_azure_login
     
-    # Run the assessment
-    run_assessment "$PYTHON_EXE" "$@"
+    # Run the assessment using virtual environment Python
+    run_assessment "$VENV_PYTHON" "$@"
 }
 
 # Execute main with all args
