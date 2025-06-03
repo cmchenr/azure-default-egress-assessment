@@ -2,6 +2,8 @@
 
 A comprehensive assessment tool developed by Aviatrix to help Azure customers evaluate their exposure to Microsoft's upcoming default internet egress changes and plan their migration strategy.
 
+Microsoft Azure is retiring default outbound access for Virtual Machines, fundamentally changing how internet egress works in Virtual Networks. This change will impact resources that currently rely on Azure's automatic internet routing without explicit configuration.
+
 ## Sample Report
 
 Get instant visibility into your Azure environment's egress configuration and security posture:
@@ -13,6 +15,13 @@ Get instant visibility into your Azure environment's egress configuration and se
 ## 🚀 Quick Launch
 
 **🔒 100% Local Execution** - Uses your existing Azure credentials, no data transmitted to Aviatrix or external services.
+
+### Prerequisites
+
+- **Azure Access**: Account with read permissions across target subscriptions
+- **Authentication**: Azure CLI (recommended) or PowerShell module configured  
+- **Python**: Version 3.6 or higher (auto-installed if missing)
+- **Internet Connection**: For downloading dependencies and script updates
 
 ### One-Line Execution
 
@@ -34,8 +43,6 @@ The tool will automatically:
 - ✅ Keep all data local on your system
 
 ## Understanding Azure's Default Egress Change
-
-Microsoft Azure is retiring default outbound access for Virtual Machines, fundamentally changing how internet egress works in Virtual Networks. This change will impact resources that currently rely on Azure's automatic internet routing without explicit configuration.
 
 ### What is Default Egress?
 
@@ -61,136 +68,32 @@ Beyond compliance with Azure's changes, addressing default egress represents a s
 
 Implementing proper egress controls with firewall capabilities can prevent these attack vectors and significantly improve your security posture.
 
-## Complex Migration Scenarios
-
-### Mixed-Mode Subnets: The Primary Challenge
-
-The most complex scenario involves subnets containing both VMs with public IPs and VMs using default egress. This creates asymmetric routing problems:
-
-- **Outbound Traffic**: Follows User Defined Routes (UDRs) to your firewall
-- **Return Traffic**: Attempts to route directly back to public IP addresses
-- **Result**: Traffic drops due to asymmetric routing, breaking connectivity
-
-**Solution Options:**
-1. **Subnet Separation**: Split workloads into dedicated subnets (recommended)
-2. **Public IP Removal**: Migrate public IPs to Azure Application Gateway with WAF
-3. **Accept Risk**: Keep existing subnets unchanged if confirmed safe by Microsoft
-
-### VNets with Overlapping CIDRs
-
-Traditional hub-and-spoke architectures fail when VNets have overlapping CIDR ranges, as Azure VNET peering cannot connect multiple VNets with identical address spaces to the same hub.
-
-**Traditional Challenges:**
-- Cannot peer overlapping VNets to central firewall hub
-- Azure Firewall in each VNet increases costs and complexity
-- Custom NAT solutions mask traffic origin, limiting firewall rule granularity
-
-**Aviatrix Solution:**
-Aviatrix's distributed firewall architecture uniquely addresses this challenge with:
-- **Global Policy Management**: Centralized rules across distributed firewalls
-- **No Hub Dependency**: Each VNet maintains independent egress
-- **Higher Availability**: Eliminates single points of failure
-- **Cost Efficiency**: Reduces data transfer costs and complexity
-
 ## Assessment Tool Features
 
-This comprehensive assessment tool analyzes your Azure environment to identify egress dependencies and provide actionable migration guidance:
+This tool analyzes your Azure environment to identify egress dependencies and provide actionable migration guidance:
 
-### Core Analysis Capabilities
+### Analysis Capabilities
 
 - **Multi-Subscription Discovery**: Automatically scans all accessible Azure subscriptions
 - **VNet Classification**: Categorizes Virtual Networks based on egress readiness:
   - **Ready: Secure** - Firewalled egress with 0.0.0.0/0 UDRs detected
   - **Ready: Insecure** - NAT Gateway configured but no firewall protection
   - **Not Ready** - No explicit egress mechanism configured
-- **Detailed Subnet Analysis**: Classifies each subnet's egress configuration:
-  - **No Workloads** - Empty subnets with no impact
-  - **Public Subnet** - All VMs have public IP addresses
-  - **Azure NAT Gateway** - Explicit NAT Gateway configured
-  - **UDR with 0.0.0.0/0** - Custom routing to firewall or appliance
-  - **Affected: Default Egress** - Using Azure's automatic egress
-  - **Affected: Mixed-Mode** - Combination of public IPs and default egress
-
-### Advanced Analysis Features
-
+- **Detailed Subnet Analysis**: Classifies each subnet's egress configuration
 - **Workload Risk Assessment**: Identifies VMs with direct public IP exposure
 - **Route Table Intelligence**: Analyzes UDR next-hop destinations and correlates with network appliances
 - **CIDR Overlap Detection**: Identifies VNets that cannot share a common hub due to address conflicts
-- **Aviatrix Readiness Check**: Evaluates route table configuration for distributed firewall deployment
 - **Remediation Prioritization**: Recommends action sequence based on complexity and risk
 
-### Comprehensive Reporting
+### Output Formats
 
-The tool generates multiple output formats for different stakeholders:
+The tool generates multiple output formats:
 
-1. **Executive Dashboard**: High-level metrics and risk assessment
-2. **Technical Analysis**: Detailed subnet-by-subnet breakdown
-3. **Remediation Roadmap**: Prioritized action items with specific guidance
-4. **Data Export**: JSON and CSV formats for further analysis
+1. **HTML Dashboard** (Primary): Interactive charts, executive summary, and technical details
+2. **Terminal Output**: Color-coded summary with progress tracking
+3. **JSON Export** (Optional): Complete data in structured format for integration
+4. **CSV Export** (Optional): Tabular format for spreadsheet analysis
 
-### Report Structure
-
-**Executive Summary**
-- Environment overview with key metrics
-- Risk distribution across subscriptions
-- High-level remediation recommendations
-
-**Network Analysis**
-- Visual charts showing VNet and subnet classifications
-- CIDR overlap analysis
-- Egress mechanism distribution
-
-**Impact Assessment**
-- Subscription-by-subscription breakdown
-- VNet details with subnet composition
-- Specific workload impact analysis
-
-**Remediation Guidance**
-- Scenario-specific recommendations
-- Implementation complexity assessment
-- Security enhancement opportunities
-
-## 🔒 Security and Privacy Commitment
-
-**100% Local Execution**: This tool runs entirely within your Azure environment using standard Azure APIs. No assessment data is transmitted to Aviatrix, external services, or third parties.
-
-**Your Credentials, Your Control**: Uses your existing Azure CLI or PowerShell authentication. No additional sign-ups or credential sharing required.
-
-**Read-Only Access**: Requires only standard read permissions to analyze your network configuration. No modifications are made to your environment.
-
-**Complete Data Ownership**: All reports and data remain on your local system. You control all data sharing and distribution.
-
-## Detailed Installation Options
-
-### Prerequisites
-
-- **Azure Access**: Account with read permissions across target subscriptions
-- **Authentication**: Azure CLI (recommended) or PowerShell module configured  
-- **Python**: Version 3.6 or higher (auto-installed if missing)
-- **Internet Connection**: For downloading dependencies and script updates
-
-### Alternative Installation Methods
-
-#### Option 1: Download and Run
-
-**Linux/macOS:**
-```bash
-# Download the script
-curl -sSL https://raw.githubusercontent.com/cmchenr/azure-default-egress-assessment/main/scripts/azure-egress-check.sh -o azure-egress-check.sh
-
-# Make executable and run
-chmod +x azure-egress-check.sh
-./azure-egress-check.sh
-```
-
-**Windows PowerShell:**
-```powershell
-# Download the script
-Invoke-WebRequest -Uri https://raw.githubusercontent.com/cmchenr/azure-default-egress-assessment/main/scripts/azure-egress-check.ps1 -OutFile azure-egress-check.ps1
-
-# Execute the assessment
-./azure-egress-check.ps1
-```
 
 ### Advanced Usage Options
 
@@ -200,14 +103,8 @@ Customize your assessment with additional parameters:
 # Target specific subscriptions
 ./azure-egress-check.sh --subscription-id "sub1-uuid,sub2-uuid"
 
-# Export detailed data for analysis
-./azure-egress-check.sh --export-json --export-csv
-
-# Enable verbose logging
-./azure-egress-check.sh --verbose
-
-# Combine multiple options
-./azure-egress-check.sh --subscription-id "your-sub-id" --export-json --verbose
+# Export data and enable logging
+./azure-egress-check.sh --export-json --export-csv --verbose
 ```
 
 ### What Happens When You Run It
@@ -229,32 +126,14 @@ Customize your assessment with additional parameters:
 1. **Azure NAT Gateway** (Quick fix, limited security)
    - Provides immediate egress capability
    - Minimal security visibility and control
-   - Best for development/testing environments
 
 2. **Firewall with UDRs** (Recommended for production)
    - Route tables with 0.0.0.0/0 pointing to firewall
-   - Azure Firewall, Aviatrix Cloud Firewall, or third-party NVAs
+   - Aviatrix Cloud Firewall, Azure Firewall, or third-party NVAs
    - Enhanced security with traffic inspection and control
 
-#### Mixed-Mode Subnets (High Priority)
-**Issue**: Asymmetric routing breaks connectivity when adding UDRs
-**Recommended Approach**:
-1. **Inventory Analysis**: Document all VMs and their connectivity requirements
-2. **Subnet Redesign**: Separate VMs by egress method into dedicated subnets  
-3. **Public IP Migration**: Consider moving public IPs to Azure Application Gateway
-4. **Staged Implementation**: Migrate in phases to minimize business impact
-
-#### VNets with CIDR Overlaps
-**Issue**: Cannot use traditional hub-and-spoke architecture
-**Solutions**:
-1. **Distributed Firewalls**: Deploy firewall in each VNet (Azure Firewall or Aviatrix)
-2. **CIDR Readdressing**: Plan subnet migrations to eliminate overlaps (complex)
-3. **Aviatrix Architecture**: Leverage distributed management without hub dependency
-
-### Security Enhancement Recommendations
-
-#### Replace NAT Gateway with Firewall
-If your assessment shows "Ready: Insecure" VNets using NAT Gateways:
+#### VNets Classified as "Ready: Insecure" - Replace NAT Gateway with Firewall
+If your assessment shows "Ready: Insecure" VNets using NAT Gateways consider replacing them with a Firewall.
 
 **Benefits of Firewall Upgrade**:
 - **Threat Detection**: Identify malicious domains and suspicious traffic patterns
@@ -263,96 +142,34 @@ If your assessment shows "Ready: Insecure" VNets using NAT Gateways:
 - **Incident Response**: Detailed logs for security investigation
 
 **Implementation Options**:
-- **Azure Firewall**: Native integration with Azure services
 - **Aviatrix Cloud Firewall**: Advanced distributed architecture with global management
-- **Third-Party NVAs**: Solutions from Palo Alto, Fortinet, Check Point, etc.
+- **Azure Firewall**
+- **Third-Party NVAs**
+
+
+### Unique Scenarios Requiring Additional Considerations
+
+#### Mixed-Mode Subnets
+**Issue**: Requires additional considerations and modification of workloads prior to enabling Egress to a Firewall.
+**Recommended Approach**:
+1. **Subnet Redesign**: Separate VMs by egress method into dedicated subnets prior to enabling UDRs.  
+2. **Public IP Migration**: The recommended path is to create a new subnet for public IPs with an Application Gateway.  Place VMs with public IPs behind the application gateway.  Migrate the public IP to the application gateway.
+
+#### VNets with CIDR Overlaps
+**Issue**: Requires a distributed firewall approach as VNETs with overlapping CIDRs cannot be connected to the same Azure VNET Hub.  Aviatrix provides multiple options to mitigate this challenge.
+**Solutions**:
+1. **Distributed Firewalls**: Deploy firewall in each VNet (Aviatrix and others)
+2. **CIDR Readdressing**: Plan subnet migrations to eliminate overlaps (complex)
+
+### Security Enhancement Recommendations
+
+
 
 #### Aviatrix Cloud Firewall Advantages
 
-For organizations seeking optimal security and operational efficiency:
+For organizations seeking optimal security and operational efficiency, Aviatrix offers unique capabilities including distributed architecture, global management, CIDR overlap support, and cost optimization. Contact Aviatrix for detailed architecture review and consultation.
 
-**Unique Capabilities**:
-- **Distributed Architecture**: No single point of failure or bottleneck
-- **Global Management**: Centralized policy across all VNets and clouds
-- **CIDR Overlap Support**: Works with overlapping address spaces
-- **Cost Optimization**: Eliminates data transfer charges between VNets
-- **Advanced Visibility**: Application-level traffic analysis and control
-
-**Ideal Scenarios**:
-- Multi-VNet environments with complex connectivity requirements
-- Organizations with CIDR overlap challenges
-- Hybrid and multi-cloud deployments requiring consistent security
-- Environments prioritizing high availability and performance
-
-## Testing and Validation
-
-### Terraform Test Environment
-
-A comprehensive test environment is included to validate the assessment tool's accuracy and help you understand different egress scenarios.
-
-**Located in**: `/terraform` directory
-
-**Test Scenarios Deployed**:
-- Default egress configuration (affected)
-- NAT Gateway implementation (ready: insecure)  
-- Route table with firewall UDR (ready: secure)
-- Mixed-mode subnet with public IPs and default egress (high-risk)
-- Multiple route tables for NVA load balancing
-- Overlapping CIDR configurations
-- Various workload distributions
-
-### Deploying the Test Environment
-
-```bash
-cd terraform
-./deploy_and_test.sh
-```
-
-This creates 8 different VNet configurations representing real-world scenarios you might encounter in your environment. After deployment, run the assessment tool to see how each scenario is classified and what recommendations are provided.
-
-**Benefits of Testing**:
-- Validate tool accuracy in a controlled environment
-- Understand classification logic before running on production
-- Practice remediation steps on test resources
-- Verify firewall rules and routing changes
-
-### Validating Results
-
-After running the assessment on your test environment:
-
-1. **Review Classifications**: Ensure each test VNet is classified correctly
-2. **Test Remediation**: Practice implementing recommended changes  
-3. **Verify Connectivity**: Confirm workloads maintain internet access after changes
-4. **Monitor Security**: Test firewall rules and traffic visibility
-
-## Output Formats and Data Export
-
-### Generated Reports
-
-**HTML Dashboard** (Primary Output)
-- Interactive charts and visual analytics
-- Drill-down capability for detailed investigation  
-- Executive summary suitable for stakeholder presentations
-- Technical details for implementation teams
-
-**Terminal Output**
-- Color-coded summary of findings
-- Quick identification of high-priority issues
-- Progress tracking during large environment scans
-
-**JSON Export** (Optional: `--export-json`)
-- Complete assessment data in structured format
-- Integration with custom analysis tools
-- Programmatic processing of results
-- Backup of detailed findings
-
-**CSV Export** (Optional: `--export-csv`)  
-- Tabular format for spreadsheet analysis
-- Easy filtering and sorting capabilities
-- Integration with reporting tools
-- Simplified data sharing
-
-### Report Locations
+## Output Formats and Report Locations
 
 All outputs are saved in the current directory with timestamps:
 - `azure-egress-assessment-YYYYMMDD-HHMMSS.html`
@@ -362,29 +179,11 @@ All outputs are saved in the current directory with timestamps:
 ## Next Steps After Assessment
 
 ### 1. Review and Prioritize
-- Focus on "Mixed-Mode" subnets first (highest complexity)
 - Address "Not Ready" VNets before creating new subnets
 - Plan security upgrades for "Ready: Insecure" NAT Gateway configurations
 
-### 2. Plan Your Migration
-- **Development/Test**: Start with non-production environments
-- **Staging**: Validate remediation approaches before production implementation
-- **Production**: Implement during planned maintenance windows
-
-### 3. Consider Enhanced Security
-If you're implementing new egress controls, consider upgrading beyond basic compliance:
-- **Threat Intelligence**: Block known malicious destinations
-- **Application Control**: Restrict access by application type and destination
-- **Zero Trust**: Implement least-privilege access principles
-- **Monitoring**: Establish baseline traffic patterns and alerts
-
-### 4. Explore Aviatrix Solutions
-For organizations seeking comprehensive cloud networking and security:
-
-**Assessment and Consultation**: Contact Aviatrix for detailed architecture review
-**Proof of Concept**: Deploy Aviatrix in a test environment to evaluate benefits
-**Migration Planning**: Work with Aviatrix experts to design optimal architecture
-**Training and Support**: Leverage Aviatrix's extensive documentation and support resources
+### 2. Explore Aviatrix Solutions
+For organizations seeking comprehensive cloud networking and security, contact Aviatrix for assessment, consultation, proof of concept, and migration planning.
 
 ## Additional Resources
 
@@ -402,13 +201,3 @@ For organizations seeking comprehensive cloud networking and security:
 ## License and Support
 
 **Copyright © 2025 Aviatrix Systems, Inc. All rights reserved.**
-
-### Support Options
-
-**Tool Issues**: For bugs or feature requests, please create an issue in the GitHub repository
-
-**Azure Architecture Guidance**: Contact your Microsoft representative for Azure-specific questions
-
-**Aviatrix Solutions**: Visit [aviatrix.com](https://aviatrix.com) or contact Aviatrix for networking and security consultation
-
-**Emergency Support**: For critical production issues, contact your respective vendor support channels
