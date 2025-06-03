@@ -185,19 +185,6 @@ All outputs are saved in the current directory with timestamps:
 ### 2. Explore Aviatrix Solutions
 For organizations seeking comprehensive cloud networking and security, contact Aviatrix for assessment, consultation, proof of concept, and migration planning.
 
-## Additional Resources
-
-### Microsoft Documentation
-- [Azure Default Outbound Access Overview](https://learn.microsoft.com/en-us/azure/virtual-network/ip-services/default-outbound-access)
-- [Azure NAT Gateway Documentation](https://learn.microsoft.com/en-us/azure/virtual-network/nat-gateway/)
-- [User Defined Routes (UDR) Guide](https://learn.microsoft.com/en-us/azure/virtual-network/virtual-networks-udr-overview)
-- [Azure Firewall Documentation](https://learn.microsoft.com/en-us/azure/firewall/)
-
-### Aviatrix Resources
-- [Aviatrix Cloud Firewall](https://aviatrix.com/products/cloud-firewall/)
-- [Azure Networking Best Practices](https://aviatrix.com/learn-center/cloud-architecture/)
-- [Multi-Cloud Security Architecture](https://aviatrix.com/solutions/multi-cloud-security/)
-
 ## License and Support
 
 **Copyright © 2025 Aviatrix Systems, Inc. All rights reserved.**
