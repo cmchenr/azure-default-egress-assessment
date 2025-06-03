@@ -30,6 +30,7 @@ try:
     from azure.mgmt.network import NetworkManagementClient
     from azure.mgmt.subscription import SubscriptionClient
     from azure.core.exceptions import ClientAuthenticationError, ResourceNotFoundError
+    from azure.core.credentials import TokenCredential
 except ImportError:
     print("Error: Required Azure libraries not found.")
     print("Please install required packages using: pip install azure-identity azure-mgmt-resource azure-mgmt-network azure-mgmt-subscription")
@@ -61,10 +62,10 @@ class AzureEgressAssessment:
     def __init__(self, args):
         """Initialize the assessment tool with command-line arguments"""
         self.args = args
-        self.credential = None
-        self.subscription_client = None
-        self.subscriptions = []
-        self.assessment_data = {}
+        self.credential: Optional[TokenCredential] = None
+        self.subscription_client: Optional[SubscriptionClient] = None
+        self.subscriptions: List[Any] = []
+        self.assessment_data: Dict[str, Any] = {}
         self.start_time = datetime.datetime.now()
         self.report_filename = f"azure-egress-assessment-{self.start_time.strftime('%Y%m%d-%H%M%S')}"
         
@@ -87,7 +88,7 @@ class AzureEgressAssessment:
             self.credential = AzureCliCredential()
             # Test the credential
             self.subscription_client = SubscriptionClient(self.credential)
-            next(self.subscription_client.subscriptions.list())
+            next(iter(self.subscription_client.subscriptions.list()))
             print(f"{Colors.GREEN}✓ Authentication successful using Azure CLI credentials{Colors.ENDC}")
         except (ClientAuthenticationError, StopIteration) as e:
             print(f"{Colors.YELLOW}! Azure CLI authentication failed, trying DefaultAzureCredential...{Colors.ENDC}")
@@ -95,7 +96,7 @@ class AzureEgressAssessment:
                 # Fall back to DefaultAzureCredential
                 self.credential = DefaultAzureCredential()
                 self.subscription_client = SubscriptionClient(self.credential)
-                next(self.subscription_client.subscriptions.list())
+                next(iter(self.subscription_client.subscriptions.list()))
                 print(f"{Colors.GREEN}✓ Authentication successful using DefaultAzureCredential{Colors.ENDC}")
             except Exception as e:
                 print(f"{Colors.RED}✗ Authentication failed: {str(e)}{Colors.ENDC}")
@@ -105,6 +106,10 @@ class AzureEgressAssessment:
     def get_subscriptions(self):
         """Get a list of accessible Azure subscriptions"""
         print(f"{Colors.HEADER}Retrieving accessible subscriptions...{Colors.ENDC}")
+        
+        if not self.subscription_client:
+            print(f"{Colors.RED}✗ No subscription client available. Please authenticate first.{Colors.ENDC}")
+            sys.exit(1)
         
         try:
             subscription_list = list(self.subscription_client.subscriptions.list())
@@ -159,6 +164,10 @@ class AzureEgressAssessment:
         
         try:
             # Initialize clients for this subscription
+            if not self.credential:
+                print(f"{Colors.RED}✗ No credential available. Please authenticate first.{Colors.ENDC}")
+                return
+            
             resource_client = ResourceManagementClient(self.credential, sub_id)
             network_client = NetworkManagementClient(self.credential, sub_id)
             
@@ -615,7 +624,7 @@ class AzureEgressAssessment:
             
             # Print subscription summary
             print(f"\n{Colors.BOLD}Subscription: {sub_data['display_name']} ({sub_id}){Colors.ENDC}")
-            print(f"  VNets: {sub_vnets} (Ready Secure: {sub_vnets_ready_secure}, Ready Insecure: {sub_vnets_ready_insecure}, Not Ready: {sub_vnets_not_ready})")
+            print(f"  VNets: {sub_vnets} (Ready Secure: {sub_vnets_ready_secure}, Ready Insecure: {sub_vnets_ready_insecure}, Affected: {sub_vnets_not_ready})")
             print(f"  Subnets: {sub_subnets}")
             print(f"  Affected Subnets: {sub_affected_subnets}")
             print(f"  VNets with Overlapping CIDRs: {sub_vnets_with_overlaps}")
@@ -630,7 +639,7 @@ class AzureEgressAssessment:
         print(f"Total VNets: {total_vnets}")
         print(f"  Ready (Secure): {total_vnets_ready_secure}")
         print(f"  Ready (Insecure): {total_vnets_ready_insecure}")
-        print(f"  Not Ready: {total_vnets_not_ready}")
+        print(f"  Affected: {total_vnets_not_ready}")
         print(f"Total Subnets: {total_subnets}")
         print(f"Total Affected Subnets: {total_affected_subnets}")
         print(f"Total VNets with Overlapping CIDRs: {total_vnets_with_overlaps}")
@@ -659,8 +668,8 @@ class AzureEgressAssessment:
             # Check if template exists
             if not os.path.exists(self.template_path):
                 print(f"{Colors.RED}✗ Template not found at: {self.template_path}{Colors.ENDC}")
-                print(f"{Colors.YELLOW}! Falling back to inline HTML generation{Colors.ENDC}")
-                return self._generate_fallback_html_report()
+                print(f"{Colors.RED}✗ HTML report generation failed - template is required{Colors.ENDC}")
+                return
             
             # Calculate summary statistics
             template_data = self._prepare_template_data()
@@ -683,10 +692,6 @@ class AzureEgressAssessment:
             if self.args.verbose:
                 import traceback
                 traceback.print_exc()
-            
-            # Try fallback generation
-            print(f"{Colors.YELLOW}! Attempting fallback HTML generation{Colors.ENDC}")
-            self._generate_fallback_html_report()
     
     def _prepare_template_data(self):
         """Prepare data for template rendering"""
@@ -1061,42 +1066,42 @@ class AzureEgressAssessment:
         for sub_id, sub_data in self.assessment_data.items():
             vnets_total = len(sub_data['vnets'])
             vnets_affected = 0
-            vnets_not_affected = 0
+            vnets_ready_secure = 0
+            vnets_ready_insecure = 0
             subnets_total = 0
-            subnets_affected = 0
             workloads_total = 0
             workloads_public_ip = 0
             
             for vnet_id, vnet_data in sub_data['vnets'].items():
-                vnet_has_affected_subnets = False
-                
+                # Count subnets and workloads
                 for subnet_id, subnet_data in vnet_data['subnets'].items():
                     subnets_total += 1
                     workloads_total += subnet_data.get('nic_count', 0)
                     workloads_public_ip += subnet_data.get('public_ip_count', 0)
-                    
-                    if subnet_data['classification'].startswith('Affected'):
-                        subnets_affected += 1
-                        vnet_has_affected_subnets = True
                 
-                if vnet_has_affected_subnets:
+                # Classify VNet
+                vnet_classification, vnet_classification_type = self._calculate_vnet_classification(vnet_data)
+                if vnet_classification_type == 'affected_insecure':
                     vnets_affected += 1
-                else:
-                    vnets_not_affected += 1
+                elif vnet_classification_type == 'not_affected_secure':
+                    vnets_ready_secure += 1
+                elif vnet_classification_type == 'not_affected_insecure':
+                    vnets_ready_insecure += 1
             
-            impact_percentage = (vnets_affected / vnets_total * 100) if vnets_total > 0 else 0
+            # Calculate readiness percentage (Ready Secure + Ready Insecure) / Total VNets
+            readiness_percentage = ((vnets_ready_secure + vnets_ready_insecure) / vnets_total * 100) if vnets_total > 0 else 0
             
             row = f"""
             <tr>
                 <td>{sub_data['display_name']}</td>
                 <td>{vnets_total}</td>
-                <td>{vnets_affected}</td>
-                <td>{vnets_not_affected}</td>
                 <td>{subnets_total}</td>
-                <td>{subnets_affected}</td>
                 <td>{workloads_total}</td>
                 <td>{workloads_public_ip}</td>
-                <td>{impact_percentage:.1f}%</td>
+                <td>{vnets_affected}</td>
+                <td>{vnets_ready_secure}</td>
+                <td>{vnets_ready_insecure}</td>
+                <td>{readiness_percentage:.1f}%</td>
             </tr>"""
             rows.append(row)
         
@@ -1208,650 +1213,6 @@ class AzureEgressAssessment:
         
         return '\n'.join(details)
     
-    def _generate_fallback_html_report(self):
-        """Generate HTML report using the old inline method when template is not available"""
-        print(f"{Colors.YELLOW}! Using fallback HTML generation{Colors.ENDC}")
-        
-        try:
-            # Calculate summary statistics with new classification system
-            total_vnets = 0
-            total_subnets = 0
-            total_affected_subnets = 0
-            total_default_egress = 0
-            total_mixed_mode = 0
-            total_not_affected = 0
-            
-            for sub_id, sub_data in self.assessment_data.items():
-                sub_vnets = len(sub_data['vnets'])
-                total_vnets += sub_vnets
-                
-                for vnet_id, vnet_data in sub_data['vnets'].items():
-                    vnet_subnets = len(vnet_data['subnets'])
-                    total_subnets += vnet_subnets
-                    
-                    for subnet_id, subnet_data in vnet_data['subnets'].items():
-                        classification = subnet_data['classification']
-                        if classification == 'Not Affected':
-                            total_not_affected += 1
-                        elif classification == 'Affected: Default Egress':
-                            total_default_egress += 1
-                            total_affected_subnets += 1
-                        elif classification == 'Affected: Mixed-Mode':
-                            total_mixed_mode += 1
-                            total_affected_subnets += 1
-            
-            # Generate HTML content using the existing method
-            html_content = self._generate_html_content(
-                total_vnets, total_subnets, total_affected_subnets,
-                total_default_egress, total_mixed_mode, total_not_affected
-            )
-            
-            # Write HTML report
-            with open(f"{self.report_filename}.html", "w", encoding='utf-8') as f:
-                f.write(html_content)
-                
-            print(f"{Colors.GREEN}✓ Fallback HTML report generated: {self.report_filename}.html{Colors.ENDC}")
-            
-        except Exception as e:
-            print(f"{Colors.RED}✗ Error generating fallback HTML report: {str(e)}{Colors.ENDC}")
-            if self.args.verbose:
-                import traceback
-                traceback.print_exc()
-    
-    def _generate_html_content(self, total_vnets, total_subnets, total_affected_subnets,
-                              total_default_egress, total_mixed_mode, total_not_affected):
-        """Generate the actual HTML content for the report"""
-        
-        # Generate current date/time
-        now = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-        
-        # Calculate percentages for charts
-        affected_percent = 0
-        if total_subnets > 0:
-            affected_percent = (total_affected_subnets / total_subnets) * 100
-        
-        default_egress_percent = 0
-        mixed_mode_percent = 0
-        not_affected_percent = 0
-        if total_subnets > 0:
-            default_egress_percent = (total_default_egress / total_subnets) * 100
-            mixed_mode_percent = (total_mixed_mode / total_subnets) * 100
-            not_affected_percent = (total_not_affected / total_subnets) * 100
-        
-        # Start HTML template
-        html = f"""<!DOCTYPE html>
-<html lang="en">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Azure Default Egress Assessment Report</title>
-    <style>
-        body {{
-            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
-            line-height: 1.6;
-            color: #333;
-            margin: 0;
-            padding: 0;
-            background-color: #f5f5f5;
-        }}
-        .container {{
-            max-width: 1200px;
-            margin: 0 auto;
-            padding: 20px;
-            background-color: #fff;
-            box-shadow: 0 0 10px rgba(0, 0, 0, 0.1);
-        }}
-        .header {{
-            background-color: #0072C6;
-            color: white;
-            padding: 20px;
-            text-align: center;
-            margin-bottom: 20px;
-        }}
-        .header h1 {{
-            margin: 0;
-            font-size: 24px;
-        }}
-        .summary {{
-            background-color: #f9f9f9;
-            padding: 20px;
-            margin-bottom: 20px;
-            border-radius: 5px;
-        }}
-        .summary-grid {{
-            display: grid;
-            grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
-            grid-gap: 20px;
-        }}
-        .summary-box {{
-            background-color: #fff;
-            padding: 15px;
-            border-radius: 5px;
-            box-shadow: 0 0 5px rgba(0, 0, 0, 0.1);
-            text-align: center;
-        }}
-        .summary-box h3 {{
-            margin-top: 0;
-            color: #0072C6;
-        }}
-        .summary-box .number {{
-            font-size: 24px;
-            font-weight: bold;
-            margin: 10px 0;
-        }}
-        .chart-container {{
-            display: flex;
-            justify-content: space-between;
-            margin-bottom: 20px;
-            flex-wrap: wrap;
-            gap: 20px;
-        }}
-        .chart {{
-            background-color: #fff;
-            padding: 20px;
-            border-radius: 5px;
-            box-shadow: 0 0 5px rgba(0, 0, 0, 0.1);
-            flex: 1;
-            min-width: 300px;
-            height: 400px;
-            display: flex;
-            flex-direction: column;
-        }}
-        .chart h3 {{
-            margin-top: 0;
-            margin-bottom: 20px;
-            color: #0072C6;
-            text-align: center;
-        }}
-        .chart canvas {{
-            flex: 1;
-            width: 100% !important;
-            height: 100% !important;
-        }}
-        .subscription {{
-            background-color: #f9f9f9;
-            padding: 20px;
-            margin-bottom: 20px;
-            border-radius: 5px;
-        }}
-        .vnet {{
-            background-color: #fff;
-            padding: 15px;
-            margin: 10px 0;
-            border-radius: 5px;
-            box-shadow: 0 0 5px rgba(0, 0, 0, 0.1);
-        }}
-        .subnet {{
-            background-color: #f9f9f9;
-            padding: 15px;
-            margin: 10px 0;
-            border-radius: 5px;
-        }}
-        .classification {{
-            padding: 5px 10px;
-            border-radius: 3px;
-            font-weight: bold;
-            display: inline-block;
-        }}
-        .not-affected {{
-            background-color: #DFF0D8;
-            color: #3C763D;
-        }}
-        .quick-remediation {{
-            background-color: #FCF8E3;
-            color: #8A6D3B;
-        }}
-        .mixed-mode {{
-            background-color: #F2DEDE;
-            color: #A94442;
-        }}
-        .insufficient-rt {{
-            background-color: #D9EDF7;
-            color: #31708F;
-        }}
-        table {{
-            width: 100%;
-            border-collapse: collapse;
-            margin-top: 10px;
-        }}
-        table th, table td {{
-            border: 1px solid #ddd;
-            padding: 8px;
-            text-align: left;
-        }}
-        table th {{
-            background-color: #f2f2f2;
-        }}
-        .collapsible {{
-            background-color: #eee;
-            color: #444;
-            cursor: pointer;
-            padding: 18px;
-            width: 100%;
-            border: none;
-            text-align: left;
-            outline: none;
-            font-size: 15px;
-            margin-bottom: 1px;
-            border-radius: 5px;
-        }}
-        .active, .collapsible:hover {{
-            background-color: #ccc;
-        }}
-        .content {{
-            padding: 0 18px;
-            max-height: 0;
-            overflow: hidden;
-            transition: max-height 0.2s ease-out;
-            background-color: white;
-            margin-bottom: 10px;
-        }}
-        .footer {{
-            text-align: center;
-            padding: 20px;
-            color: #777;
-            font-size: 14px;
-        }}
-        .remediation {{
-            background-color: #e8f5e9;
-            padding: 15px;
-            margin-top: 10px;
-            border-radius: 5px;
-            border-left: 5px solid #66bb6a;
-        }}
-        .remediation h4 {{
-            margin-top: 0;
-            color: #2e7d32;
-        }}
-        @media (max-width: 768px) {{
-            .chart {{
-                width: 100%;
-            }}
-        }}
-    </style>
-    <!-- Include Chart.js -->
-    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
-</head>
-<body>
-    <div class="container">
-        <div class="header">
-            <h1>Azure Default Egress Assessment Report</h1>
-            <p>Generated on {now}</p>
-        </div>
-        
-        <div class="summary">
-            <h2>Executive Summary</h2>
-            <p>This report provides an assessment of the impact of Azure's upcoming change to default internet egress on your environment.</p>
-            
-            <div class="summary-grid">
-                <div class="summary-box">
-                    <h3>Subscriptions</h3>
-                    <div class="number">{len(self.assessment_data)}</div>
-                </div>
-                <div class="summary-box">
-                    <h3>Virtual Networks</h3>
-                    <div class="number">{total_vnets}</div>
-                </div>
-                <div class="summary-box">
-                    <h3>Subnets</h3>
-                    <div class="number">{total_subnets}</div>
-                </div>
-            </div>
-            
-            <h3>Subnet Impact and Classification</h3>
-            <table>
-                <tr>
-                    <th>Subscription</th>
-                    <th>Subnet Name</th>
-                    <th>VNET Name</th>
-                    <th>Classification</th>
-                    <th>Risk Level</th>
-                    <th>Recommended Remediation</th>
-                </tr>"""
-        # Add rows for each subnet across all subscriptions
-        for sub_id, sub_data in self.assessment_data.items():
-            for vnet_id, vnet_data in sub_data['vnets'].items():
-                for subnet_id, subnet_data in vnet_data['subnets'].items():
-                    classification = subnet_data['classification']
-                    
-                    # Determine risk level and remediation based on classification
-                    if classification == 'Not Affected':
-                        risk_level = 'Low'
-                        remediation = 'No action needed'
-                        classification_class = 'not-affected'
-                    elif classification == 'Affected: Default Egress':
-                        risk_level = 'High'
-                        remediation = 'Implement controlled egress (NAT Gateway or UDR)'
-                        classification_class = 'affected-default'
-                    elif classification == 'Affected: Mixed-Mode':
-                        risk_level = 'Critical'
-                        remediation = 'Review and standardize mixed-mode configuration'
-                        classification_class = 'affected-mixed'
-                    else:
-                        risk_level = 'Unknown'
-                        remediation = 'Review configuration'
-                        classification_class = 'unknown'
-                    
-                    html += f"""
-                <tr>
-                    <td>{sub_data['display_name']}</td>
-                    <td>{subnet_data['name']}</td>
-                    <td>{vnet_data['name']}</td>
-                    <td><span class="classification {classification_class}">{classification}</span></td>
-                    <td>{risk_level}</td>
-                    <td>{remediation}</td>
-                </tr>"""
-                    
-        html += """
-            </table>
-            
-            <h3>Subscription Summary</h3>
-            <table>
-                <tr>
-                    <th>Subscription</th>
-                    <th>Total VNETs</th>
-                    <th>VNETs Needing Remediation</th>
-                    <th>VNETs Not Affected</th>
-                    <th>Impact Percentage</th>
-                </tr>"""
-        # Add rows for each subscription's VNET summary
-        for sub_id, sub_data in self.assessment_data.items():
-            vnets_total = len(sub_data['vnets'])
-            vnets_affected = 0
-            vnets_not_affected = 0
-            
-            for vnet_id, vnet_data in sub_data['vnets'].items():
-                # Count affected subnets manually
-                affected_count = 0
-                for subnet_id, subnet_data in vnet_data['subnets'].items():
-                    if subnet_data['classification'].startswith('Affected'):
-                        affected_count += 1
-                
-                if affected_count > 0:
-                    vnets_affected += 1
-                else:
-                    vnets_not_affected += 1
-            
-            impact_percentage = (vnets_affected / vnets_total * 100) if vnets_total > 0 else 0
-            
-            html += f"""
-                <tr>
-                    <td>{sub_data['display_name']}</td>
-                    <td>{vnets_total}</td>
-                    <td>{vnets_affected}</td>
-                    <td>{vnets_not_affected}</td>
-                    <td>{impact_percentage:.1f}%</td>
-                </tr>"""
-                    
-        html += """
-            </table>
-        </div>
-        
-        <div class="chart-container">
-            <div class="chart">
-                <h3>Impact Assessment</h3>
-                <canvas id="impactChart"></canvas>
-            </div>
-            <div class="chart">
-                <h3>Classification Distribution</h3>
-                <canvas id="classificationChart"></canvas>
-            </div>
-        </div>
-        
-        <div class="remediation">
-            <h4>Remediation Guidance</h4>
-            <p><strong>For Default Egress Subnets:</strong> Add a route table with a default route (0.0.0.0/0) pointing to an NVA or deploy a NAT Gateway for controlled egress.</p>
-            <p><strong>For Mixed-Mode Subnets:</strong> Consider restructuring the subnet to separate resources with public IPs from those without, or implement a consistent connectivity strategy.</p>
-            <p><strong>General Recommendation:</strong> Standardize egress methods across your environment for better security and management.</p>
-        </div>
-
-    <!-- Subscription Details -->"""
-        
-        # Add subscription details
-        for sub_id, sub_data in self.assessment_data.items():
-            sub_name = sub_data['display_name']
-            sub_vnets = len(sub_data['vnets'])
-            
-            html += f"""
-        <button class="collapsible">Subscription: {sub_name} ({sub_id}) - {sub_vnets} VNets</button>
-        <div class="content">
-"""
-            
-            # Add VNet details
-            for vnet_id, vnet_data in sub_data['vnets'].items():
-                vnet_name = vnet_data['name']
-                resource_group = vnet_data['resource_group']
-                address_space = ", ".join(vnet_data['address_space'])
-                subnets_count = len(vnet_data['subnets'])
-                
-                # Count affected subnets manually
-                affected_count = 0
-                for subnet_id, subnet_data in vnet_data['subnets'].items():
-                    if subnet_data['classification'].startswith('Affected'):
-                        affected_count += 1
-                
-                html += f"""
-            <div class="vnet">
-                <h3>VNet: {vnet_name}</h3>
-                <p><strong>Resource Group:</strong> {resource_group}</p>
-                <p><strong>Address Space:</strong> {address_space}</p>
-                <p><strong>Subnets:</strong> {subnets_count} total, {affected_count} affected</p>
-"""
-                
-                if subnets_count > 0:
-                    html += """
-                <h4>Subnets</h4>
-                <table>
-                    <tr>
-                        <th>Subnet Name</th>
-                        <th>Address Prefix</th>
-                        <th>Classification</th>
-                        <th>Route Table</th>
-                        <th>NAT Gateway</th>
-                        <th>NICs</th>
-                    </tr>
-"""
-                    
-                    # Add subnet details
-                    for subnet_id, subnet_data in vnet_data['subnets'].items():
-                        subnet_name = subnet_data['name']
-                        address_prefix = subnet_data['address_prefix']
-                        classification = subnet_data['classification']
-                        route_table_id = subnet_data.get('route_table_id', 'None')
-                        nat_gateway_id = subnet_data.get('nat_gateway_id', 'None')
-                        nics_count = len(subnet_data['network_interfaces'])
-                        nics_with_public_ip = sum(1 for nic in subnet_data['network_interfaces'] if nic['has_public_ip'])
-                        
-                        classification_class = ""
-                        if classification == "Not Affected":
-                            classification_class = "not-affected"
-                        elif classification == "Affected: Default Egress":
-                            classification_class = "affected-default"
-                        elif classification == "Affected: Mixed-Mode":
-                            classification_class = "affected-mixed"
-                        else:
-                            classification_class = "status-unknown"
-                        
-                        route_table_name = "None"
-                        if route_table_id is not None and route_table_id != "None":
-                            route_table_name = route_table_id.split('/')[-1]
-                            
-                        nat_gateway_name = "None"
-                        if nat_gateway_id is not None and nat_gateway_id != "None":
-                            nat_gateway_name = nat_gateway_id.split('/')[-1]
-                        
-                        html += f"""
-                    <tr>
-                        <td>{subnet_name}</td>
-                        <td>{address_prefix}</td>
-                        <td><span class="classification {classification_class}">{classification}</span></td>
-                        <td>{route_table_name}</td>
-                        <td>{nat_gateway_name}</td>
-                        <td>{nics_count} ({nics_with_public_ip} with public IP)</td>
-                    </tr>
-"""
-                    
-                    html += """
-                </table>
-"""
-                
-                html += """
-            </div>
-"""
-            
-            html += """
-        </div>
-"""
-        
-        # Complete the HTML template
-        html += """
-        <div class="footer">
-            <p>Azure Default Egress Assessment Tool</p>
-            <p>Copyright © 2025 Aviatrix Systems, Inc. All rights reserved.</p>
-        </div>
-    </div>
-
-    <script>
-        document.addEventListener('DOMContentLoaded', function() {
-            // Initialize collapsible sections
-            var coll = document.getElementsByClassName("collapsible");
-            var i;
-            
-            for (i = 0; i < coll.length; i++) {
-                coll[i].addEventListener("click", function() {
-                    this.classList.toggle("active");
-                    var content = this.nextElementSibling;
-                    if (content.style.maxHeight) {
-                        content.style.maxHeight = null;
-                    } else {
-                        content.style.maxHeight = content.scrollHeight + "px";
-                    } 
-                });
-            }
-        });
-
-        // Charts
-        window.onload = function() {
-            // Common chart options
-            const commonOptions = {
-                responsive: true,
-                maintainAspectRatio: false,
-                cutout: '60%',
-                layout: {
-                    padding: 20
-                },
-                plugins: {
-                    legend: {
-                        position: 'bottom',
-                        labels: {
-                            padding: 20,
-                            usePointStyle: true,
-                            pointStyle: 'circle'
-                        }
-                    },
-                    title: {
-                        display: true,
-                        font: {
-                            size: 16,
-                            weight: 'bold'
-                        },
-                        padding: {
-                            top: 10,
-                            bottom: 30
-                        }
-                    },
-                    tooltip: {
-                        backgroundColor: 'rgba(0,0,0,0.8)',
-                        titleFont: {
-                            size: 14
-                        },
-                        bodyFont: {
-                            size: 13
-                        },
-                        padding: 12,
-                        cornerRadius: 6,
-                        displayColors: true
-                    }
-                }
-            };
-
-            // Impact Chart
-            var impactCtx = document.getElementById('impactChart').getContext('2d');
-            var impactChart = new Chart(impactCtx, {
-                type: 'doughnut',
-                data: {
-                    labels: ['Affected', 'Not Affected'],
-                    datasets: [{
-                        data: [
-""" + f"{total_affected_subnets}, {total_subnets - total_affected_subnets}" + """],
-                        backgroundColor: ['#f8d7da', '#d4edda'],
-                        borderWidth: 1,
-                        borderColor: 'white'
-                    }]
-                },
-                options: {
-                    ...commonOptions,
-                    plugins: {
-                        ...commonOptions.plugins,
-                        title: {
-                            ...commonOptions.plugins.title,
-                            text: 'Subnet Impact Assessment'
-                        },
-                        tooltip: {
-                            ...commonOptions.plugins.tooltip,
-                            callbacks: {
-                                label: function(context) {
-                                    const value = context.raw;
-                                    const total = context.dataset.data.reduce((a, b) => a + b, 0);
-                                    const percentage = ((value / total) * 100).toFixed(1);
-                                    return `${context.label}: ${value} subnets (${percentage}%)`;
-                                }
-                            }
-                        }
-                    }
-                }
-            });
-            
-            // Classification Chart
-            var classCtx = document.getElementById('classificationChart').getContext('2d');
-            var classChart = new Chart(classCtx, {
-                type: 'doughnut',
-                data: {
-                    labels: ['Not Affected', 'Default Egress', 'Mixed-Mode'],
-                    datasets: [{
-                        data: [""" + f"{total_not_affected}, {total_default_egress}, {total_mixed_mode}" + """],
-                        backgroundColor: ['#d4edda', '#fff3cd', '#f8d7da'],
-                        borderWidth: 1,
-                        borderColor: 'white'
-                    }]
-                },
-                options: {
-                    ...commonOptions,
-                    plugins: {
-                        ...commonOptions.plugins,
-                        title: {
-                            ...commonOptions.plugins.title,
-                            text: 'Subnet Classification Distribution'
-                        },
-                        tooltip: {
-                            ...commonOptions.plugins.tooltip,
-                            callbacks: {
-                                label: function(context) {
-                                    const value = context.raw;
-                                    const total = context.dataset.data.reduce((a, b) => a + b, 0);
-                                    const percentage = ((value / total) * 100).toFixed(1);
-                                    return `${context.label}: ${value} subnets (${percentage}%)`;
-                                }
-                            }
-                        }
-                    }
-                }
-            });
-        };
-    </script>
-</body>
-</html>
-"""
     
     def export_json(self):
         """Export assessment data to JSON file"""
