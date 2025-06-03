@@ -35,6 +35,26 @@ curl -sSL https://raw.githubusercontent.com/cmchenr/azure-default-egress-assessm
 iwr -useb https://raw.githubusercontent.com/cmchenr/azure-default-egress-assessment/main/scripts/azure-egress-check.ps1 | iex
 ```
 
+**Azure Portal PowerShell (Cloud Shell):**
+The PowerShell script also runs directly in the Azure Portal using the PowerShell terminal:
+
+1. Open [Azure Portal](https://portal.azure.com) and click the PowerShell Cloud Shell icon (>_)
+2. Run the same PowerShell command:
+   ```powershell
+   iwr -useb https://raw.githubusercontent.com/cmchenr/azure-default-egress-assessment/main/scripts/azure-egress-check.ps1 | iex
+   ```
+3. After completion, copy the generated HTML report content to view it locally:
+   ```powershell
+   # List generated reports
+   ls azure-egress-assessment-*.html
+   
+   # Display and copy the HTML content
+   cat azure-egress-assessment-*.html
+   ```
+4. Save the HTML content to a local file and open in your browser
+
+This provides a convenient option for users who prefer working directly in Azure Portal without local installations.
+
 The tool will automatically:
 - ✅ Install required dependencies
 - ✅ Use your existing Azure CLI/PowerShell credentials  
