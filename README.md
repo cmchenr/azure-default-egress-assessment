@@ -43,15 +43,7 @@ The PowerShell script also runs directly in the Azure Portal using the PowerShel
    ```powershell
    iwr -useb https://raw.githubusercontent.com/cmchenr/azure-default-egress-assessment/main/scripts/azure-egress-check.ps1 | iex
    ```
-3. After completion, copy the generated HTML report content to view it locally:
-   ```powershell
-   # List generated reports
-   ls azure-egress-assessment-*.html
-   
-   # Display and copy the HTML content
-   cat azure-egress-assessment-*.html
-   ```
-4. Save the HTML content to a local file and open in your browser
+3. Download the file by clicking "Manage Files" -> "Download" and copying/pasting the filename from the end of the script.
 
 This provides a convenient option for users who prefer working directly in Azure Portal without local installations.
 
