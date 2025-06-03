@@ -565,14 +565,14 @@ class AzureEgressAssessment:
                         vnet_affected_count += 1
                 sub_affected_subnets += vnet_affected_count
                 
-                # VNet classification counts
-                vnet_classification = vnet_data.get('classification', 'Not Affected')
-                if vnet_classification == 'Affected':
+                # VNet classification counts using new classification system
+                vnet_classification, vnet_classification_type = self._calculate_vnet_classification(vnet_data)
+                if vnet_classification_type == 'affected_insecure':
                     sub_vnets_not_ready += 1  # Affected VNets need attention
-                elif vnet_classification == 'Not Affected':
-                    sub_vnets_ready_secure += 1  # Not affected VNets are ready
-                else:
-                    sub_vnets_not_ready += 1  # Default to needing attention
+                elif vnet_classification_type == 'not_affected_secure':
+                    sub_vnets_ready_secure += 1  # Secure VNets are ready
+                elif vnet_classification_type == 'not_affected_insecure':
+                    sub_vnets_ready_insecure += 1  # Insecure but not affected VNets
                 
                 if vnet_data.get('overlapping_cidrs', []):
                     sub_vnets_with_overlaps += 1
@@ -720,14 +720,14 @@ class AzureEgressAssessment:
             total_vnets += sub_vnets
             
             for vnet_id, vnet_data in sub_data['vnets'].items():
-                # VNet classification
-                vnet_classification = vnet_data.get('classification', 'Not Affected')
-                if vnet_classification == 'Affected':
+                # VNet classification using new classification system
+                vnet_classification, vnet_classification_type = self._calculate_vnet_classification(vnet_data)
+                if vnet_classification_type == 'affected_insecure':
                     vnets_not_ready += 1  # Affected VNets need attention
-                elif vnet_classification == 'Not Affected':
-                    vnets_ready_secure += 1  # Not affected VNets are ready
-                else:
-                    vnets_not_ready += 1  # Default to needing attention
+                elif vnet_classification_type == 'not_affected_secure':
+                    vnets_ready_secure += 1  # Secure VNets are ready
+                elif vnet_classification_type == 'not_affected_insecure':
+                    vnets_ready_insecure += 1  # Insecure but not affected VNets
                 
                 vnet_subnets = len(vnet_data['subnets'])
                 total_subnets += vnet_subnets
@@ -984,24 +984,16 @@ class AzureEgressAssessment:
         
         for sub_id, sub_data in self.assessment_data.items():
             for vnet_id, vnet_data in sub_data['vnets'].items():
-                # Recalculate VNet classification based on subnet classifications
-                has_affected_subnets = False
-                for subnet_id, subnet_data in vnet_data['subnets'].items():
-                    if subnet_data['classification'].startswith('Affected'):
-                        has_affected_subnets = True
-                        break
+                # Recalculate VNet classification based on subnet egress mechanisms
+                vnet_classification, vnet_classification_type = self._calculate_vnet_classification(vnet_data)
                 
-                # Set simple classification
-                if has_affected_subnets:
-                    classification = 'Affected'
-                else:
-                    classification = 'Not Affected'
-                
-                # Determine classification styling
-                if classification == 'Affected':
-                    classification_class = 'status-affected'
-                elif classification == 'Not Affected':
-                    classification_class = 'status-not-affected'
+                # Map classification type to CSS class
+                if vnet_classification_type == 'affected_insecure':
+                    classification_class = 'status-affected-insecure'
+                elif vnet_classification_type == 'not_affected_insecure':
+                    classification_class = 'status-not-affected-insecure'
+                elif vnet_classification_type == 'not_affected_secure':
+                    classification_class = 'status-not-affected-secure'
                 else:
                     classification_class = 'status-unknown'
                 
@@ -1017,7 +1009,7 @@ class AzureEgressAssessment:
                     if 'Azure NAT Gateway' in reason:
                         egress_mechanisms.add('NAT Gateway')
                     elif 'UDR with 0.0.0.0/0' in reason:
-                        egress_mechanisms.add('UDR')
+                        egress_mechanisms.add('UDR with Default Route')
                     elif 'Public Subnet' in reason:
                         egress_mechanisms.add('Public Subnet')
                     elif 'Using default egress' in reason:
@@ -1025,7 +1017,7 @@ class AzureEgressAssessment:
                     elif 'Mixed mode' in reason:
                         egress_mechanisms.add('Mixed Mode')
                     elif 'No Workloads' in reason:
-                        egress_mechanisms.add('No Workloads')
+                        egress_mechanisms.add('Empty Subnet')
                     elif mechanism and mechanism != 'Unknown':
                         egress_mechanisms.add(mechanism)
                     else:
@@ -1052,7 +1044,7 @@ class AzureEgressAssessment:
                 <tr>
                     <td>{sub_data['display_name']}</td>
                     <td>{vnet_data['name']}</td>
-                    <td><span class="status-badge {classification_class}">{classification}</span></td>
+                    <td><span class="status-badge {classification_class}">{vnet_classification}</span></td>
                     <td>{', '.join(vnet_data['address_space'])}</td>
                     <td>{len(vnet_data['subnets'])}</td>
                     <td>{total_workloads}</td>
@@ -1136,14 +1128,16 @@ class AzureEgressAssessment:
                     if subnet_data['classification'].startswith('Affected'):
                         affected_count += 1
                 
-                # Get VNet classification and capabilities
-                vnet_classification = vnet_data.get('classification', 'Not Affected')
+                # Get VNet classification using new classification system
+                vnet_classification, vnet_classification_type = self._calculate_vnet_classification(vnet_data)
                 
                 # Determine VNet classification CSS class
-                if vnet_classification == 'Affected':
-                    vnet_class = 'status-affected'
-                elif vnet_classification == 'Not Affected':
-                    vnet_class = 'status-not-affected'
+                if vnet_classification_type == 'affected_insecure':
+                    vnet_class = 'status-affected-insecure'
+                elif vnet_classification_type == 'not_affected_insecure':
+                    vnet_class = 'status-not-affected-insecure'
+                elif vnet_classification_type == 'not_affected_secure':
+                    vnet_class = 'status-not-affected-secure'
                 else:
                     vnet_class = 'status-unknown'
                     
@@ -1676,7 +1670,7 @@ class AzureEgressAssessment:
                         elif classification == "Affected: Mixed-Mode":
                             classification_class = "affected-mixed"
                         else:
-                            classification_class = "unknown"
+                            classification_class = "status-unknown"
                         
                         route_table_name = "None"
                         if route_table_id is not None and route_table_id != "None":
@@ -1858,8 +1852,6 @@ class AzureEgressAssessment:
 </body>
 </html>
 """
-        
-        return html
     
     def export_json(self):
         """Export assessment data to JSON file"""
@@ -1940,6 +1932,51 @@ class AzureEgressAssessment:
             return match.group(1)
         return ""
 
+    def _calculate_vnet_classification(self, vnet_data):
+        """Calculate VNet classification based on subnet egress mechanisms
+        
+        Returns:
+            tuple: (classification_text, classification_type)
+            classification_type: 'affected_insecure', 'not_affected_insecure', 'not_affected_secure'
+        """
+        has_affected_subnets = False
+        has_nat_gateway_subnets = False
+        has_udr_subnets = False
+        non_public_subnets = 0
+        
+        for subnet_id, subnet_data in vnet_data['subnets'].items():
+            reason = subnet_data.get('reason', '')
+            
+            # Skip public subnets and subnets with no workloads for classification
+            if 'Public Subnet' in reason or 'No Workloads' in reason:
+                continue
+            
+            non_public_subnets += 1
+            
+            # Check if subnet is affected (Default Egress or Mixed Mode)
+            if 'Using default egress' in reason or 'Mixed mode' in reason:
+                has_affected_subnets = True
+            # Check egress mechanisms for non-affected subnets
+            elif 'Azure NAT Gateway' in reason:
+                has_nat_gateway_subnets = True
+            elif 'UDR with 0.0.0.0/0' in reason:
+                has_udr_subnets = True
+        
+        # Determine VNet classification
+        if has_affected_subnets:
+            return 'Affected: Insecure', 'affected_insecure'
+        elif non_public_subnets == 0:
+            # No non-public subnets to classify
+            return 'Not Affected: Secure', 'not_affected_secure'
+        elif has_udr_subnets and not has_nat_gateway_subnets:
+            # All non-public subnets use UDRs
+            return 'Not Affected: Secure', 'not_affected_secure'
+        elif has_nat_gateway_subnets and not has_udr_subnets:
+            # All non-public subnets use NAT Gateway
+            return 'Not Affected: Insecure', 'not_affected_insecure'
+        else:
+            # Mixed UDR and NAT Gateway usage - default to insecure
+            return 'Not Affected: Insecure', 'not_affected_insecure'
 def parse_arguments():
     """Parse command-line arguments"""
     parser = argparse.ArgumentParser(
