@@ -106,7 +106,6 @@ The tool generates multiple output formats:
 3. **JSON Export** (Optional): Complete data in structured format for integration
 4. **CSV Export** (Optional): Tabular format for spreadsheet analysis
 
-
 ### Advanced Usage Options
 
 Customize your assessment with additional parameters:
@@ -128,58 +127,100 @@ Customize your assessment with additional parameters:
 5. **Reporting**: Generates timestamped HTML report with detailed findings
 6. **Output**: Displays summary in terminal with paths to detailed reports
 
+---
+
 ## Remediation Strategies
 
-### Immediate Actions for Different Scenarios
+After running the assessment, you'll need to address different types of VNet configurations. Here are the recommended approaches for each scenario:
 
-#### VNets Classified as "Not Ready"
-**Issue**: No explicit egress mechanism configured
-**Solutions**:
-1. **Azure NAT Gateway** (Quick fix, limited security)
-   - Provides immediate egress capability
-   - Minimal security visibility and control
+## Scenario 1: VNets Classified as "Not Ready"
 
-2. **Firewall with UDRs** (Recommended for production)
-   - Route tables with 0.0.0.0/0 pointing to firewall
-   - Aviatrix Cloud Firewall, Azure Firewall, or third-party NVAs
-   - Enhanced security with traffic inspection and control
+**Issue:** No explicit egress mechanism configured - these VNets will lose internet connectivity for new subnets.
 
-#### VNets Classified as "Ready: Insecure" - Replace NAT Gateway with Firewall
-If your assessment shows "Ready: Insecure" VNets using NAT Gateways consider replacing them with a Firewall.
+### Option A: Azure NAT Gateway (Quick Fix)
+- ✅ **Pros:** Fast deployment, minimal configuration required
+- ❌ **Cons:** Limited security visibility, no traffic inspection or control
+- **Best for:** Temporary solutions or non-critical workloads
 
-**Benefits of Firewall Upgrade**:
-- **Threat Detection**: Identify malicious domains and suspicious traffic patterns
-- **Data Loss Prevention**: Block unauthorized data exfiltration attempts  
-- **Compliance**: Meet regulatory requirements for traffic inspection
-- **Incident Response**: Detailed logs for security investigation
+### Option B: Firewall with UDRs (Recommended)
+- ✅ **Pros:** Enhanced security, traffic inspection, threat detection
+- ✅ **Pros:** Compliance-ready, detailed logging for incident response
+- ❌ **Cons:** More complex setup, higher initial cost
+- **Best for:** Production environments, security-sensitive workloads
 
-**Implementation Options**:
-- **Aviatrix Cloud Firewall**: Advanced distributed architecture with global management
-- **Azure Firewall**
-- **Third-Party NVAs**
+**Implementation:** Create route tables with 0.0.0.0/0 pointing to your firewall solution (Aviatrix Cloud Firewall, Azure Firewall, or third-party NVAs).
 
+---
 
-### Unique Scenarios Requiring Additional Considerations
+## Scenario 2: VNets Classified as "Ready: Insecure"
 
-#### Mixed-Mode Subnets
-**Issue**: Requires additional considerations and modification of workloads prior to enabling Egress to a Firewall.
-**Recommended Approach**:
-1. **Subnet Redesign**: Separate VMs by egress method into dedicated subnets prior to enabling UDRs.  
-2. **Public IP Migration**: The recommended path is to create a new subnet for public IPs with an Application Gateway.  Place VMs with public IPs behind the application gateway.  Migrate the public IP to the application gateway.
+**Issue:** Currently using NAT Gateway - functional but lacks security controls.
 
-#### VNets with CIDR Overlaps
-**Issue**: Requires a distributed firewall approach as VNETs with overlapping CIDRs cannot be connected to the same Azure VNET Hub.  Aviatrix provides multiple options to mitigate this challenge.
-**Solutions**:
-1. **Distributed Firewalls**: Deploy firewall in each VNet (Aviatrix and others)
-2. **CIDR Readdressing**: Plan subnet migrations to eliminate overlaps (complex)
+### Upgrade Benefits
+Replacing NAT Gateway with a firewall provides:
+- **Threat Detection:** Identify malicious domains and suspicious traffic patterns
+- **Data Loss Prevention:** Block unauthorized data exfiltration attempts  
+- **Compliance:** Meet regulatory requirements for traffic inspection
+- **Incident Response:** Detailed logs for security investigation
 
-### Security Enhancement Recommendations
+### Implementation Options
+- **Aviatrix Cloud Firewall:** Advanced distributed architecture with global management
+- **Azure Firewall:** Native Azure solution with built-in threat intelligence
+- **Third-Party NVAs:** Solutions from Fortinet, Palo Alto, Check Point, etc.
 
+---
 
+## Scenario 3: Special Cases Requiring Additional Planning
 
-#### Aviatrix Cloud Firewall Advantages
+### Mixed-Mode Subnets
+**Challenge:** Subnets containing both VMs with public IPs and VMs requiring egress routing.
 
-For organizations seeking optimal security and operational efficiency, Aviatrix offers unique capabilities including distributed architecture, global management, CIDR overlap support, and cost optimization. Contact Aviatrix for detailed architecture review and consultation.
+**Solution Steps:**
+1. **Subnet Redesign:** Separate VMs by egress method into dedicated subnets
+2. **Public IP Migration:** 
+   - Create new subnet for Application Gateway
+   - Move VMs with public IPs behind Application Gateway
+   - Migrate public IP addresses to Application Gateway
+3. **Apply UDRs:** Configure User Defined Routes for egress-only subnets
+
+### VNets with CIDR Overlaps
+**Challenge:** Overlapping IP address ranges prevent connection to shared hub architecture.
+
+**Solution Options:**
+1. **Distributed Firewalls:** Deploy firewall in each VNet individually
+   - Aviatrix supports this architecture natively
+   - Other vendors may require additional configuration
+2. **CIDR Readdressing:** Plan subnet migrations to eliminate overlaps
+   - More complex but enables centralized hub architecture
+   - Requires careful planning and workload migration
+
+---
+
+## Security Enhancement Recommendations
+
+### Why Firewalls Over NAT Gateways?
+
+| Feature | NAT Gateway | Aviatrix Cloud Firewall |
+|---------|-------------|-------------------|
+| Internet Egress | ✅ | ✅ |
+| Traffic Inspection | ❌ | ✅ |
+| External URL and FQDN Visibility | ❌ | ✅ |
+| AI-Powered Threat Detection | ❌ | ✅ |
+| Kubernetes Firewall | ❌ | ✅ |
+| 3rd Party API Usage Reporting | ❌ | ✅ |
+| Zero Trust Policy Control | ❌ | ✅ |
+
+### Aviatrix Cloud Firewall Advantages
+
+For organizations seeking optimal security and operational efficiency, Aviatrix offers:
+- **Distributed Architecture:** Firewall capability in every VNet
+- **Global Management:** Centralized policy control across regions
+- **CIDR Overlap Support:** Handles complex networking scenarios
+- **Cost Optimization:** Efficient resource utilization
+
+Contact Aviatrix for detailed architecture review and consultation.
+
+---
 
 ## Output Formats and Report Locations
 
